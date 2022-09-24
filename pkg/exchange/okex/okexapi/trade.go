@@ -2,6 +2,7 @@ package okexapi
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -104,7 +105,9 @@ func (r *PlaceOrderRequest) Parameters() map[string]interface{} {
 
 func (r *PlaceOrderRequest) Do(ctx context.Context) (*OrderResponse, error) {
 	payload := r.Parameters()
+	fmt.Println(payload)
 	req, err := r.client.newAuthenticatedRequest("POST", "/api/v5/trade/order", nil, payload)
+	fmt.Println(req, err)
 	if err != nil {
 		return nil, err
 	}

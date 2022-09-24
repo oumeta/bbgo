@@ -3,6 +3,7 @@ package okex
 import (
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"math"
 	"strconv"
 	"time"
@@ -192,13 +193,22 @@ func (e *Exchange) QueryAccountBalances(ctx context.Context) (types.BalanceMap, 
 }
 
 func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*types.Order, error) {
-	orderReq := e.client.TradeService.NewPlaceOrderRequest()
-	param := order.Params
 
 	orderType, err := toLocalOrderType(order.Type)
 	if err != nil {
 		return nil, err
 	}
+
+	switch order.Type {
+	case types.OrderTypeTakeProfitLimit, types.OrderTypeTakeProfitMarket, types.OrderTypeStopLimit, types.OrderTypeStopMarket:
+
+		createdOrder, err := e.SubmitAlgoOrder(ctx, order)
+		return createdOrder, err
+	}
+	fmt.Println("fuck2")
+
+	orderReq := e.client.TradeService.NewPlaceOrderRequest()
+	param := order.Params
 
 	orderReq.InstrumentID(toLocalSymbol(order.Symbol))
 	orderReq.Side(toLocalSideType(order.Side))
@@ -210,15 +220,25 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 		orderReq.Quantity(order.Quantity.FormatString(8))
 	}
 
+	fmt.Println("order.Market.FormatPrice(order.Price)", order.Market.FormatPrice(order.Price))
 	// set price field for limit orders
 	switch order.Type {
 	case types.OrderTypeStopLimit, types.OrderTypeLimit, types.OrderTypeLimitMaker:
 		if order.Market.Symbol != "" {
+			fmt.Println(33)
 			orderReq.Price(order.Market.FormatPrice(order.Price))
 		} else {
 			// TODO report error
+			fmt.Println(444)
 			orderReq.Price(order.Price.FormatString(8))
 		}
+	case types.OrderTypeMarket, types.OrderTypeStopMarket, types.OrderTypeTakeProfitMarket:
+		//okex 市价交易的，货币类型
+		if !e.IsFutures {
+			orderReq.TgtCcy("base_ccy")
+			fmt.Println("afdadfs")
+		}
+
 	}
 
 	switch order.TimeInForce {
@@ -244,10 +264,7 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 			orderReq.CCY(param["ccy"].(string))
 
 		}
-		if param["tgtCcy"] != nil {
-			orderReq.TgtCcy(param["tgtCcy"].(string))
 
-		}
 	}
 
 	if e.IsFutures {
@@ -261,7 +278,7 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 
 		orderReq.PosSide(side)
 		orderReq.TradeMode("cross")
-		orderReq.TgtCcy("USDT")
+		//
 		if order.ReduceOnly {
 
 			fmt.Println("close ", order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
@@ -274,10 +291,13 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 		}
 
 	} else {
+		orderReq.TgtCcy("base_ccy")
 		orderReq.TradeMode("cash")
 	}
+	//
 
 	//orderReq("cash")
+	fmt.Println(3333)
 	orderHead, err := orderReq.Do(ctx)
 	if err != nil {
 		return nil, err
@@ -307,36 +327,121 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 		IsIsolated:       false,
 	}, nil
 
-	// TODO: move this to batch place orders interface
-	/*
-		batchReq := e.client.TradeService.NewBatchPlaceOrderRequest()
-		batchReq.Add(reqs...)
-		orderHeads, err := batchReq.Do(ctx)
+}
+func (e *Exchange) SubmitAlgoOrder(ctx context.Context, order types.SubmitOrder) (*types.Order, error) {
+
+	orderReq := e.client.TradeService.NewPlaceAlgoOrderRequest()
+
+	orderType, err := toLocalOrderType(order.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	orderReq.InstrumentID(toLocalSymbol(order.Symbol))
+	orderReq.Side(toLocalSideType(order.Side))
+
+	if order.Market.Symbol != "" {
+		orderReq.Quantity(order.Market.FormatQuantity(order.Quantity))
+	} else {
+
+		orderReq.Quantity(order.Quantity.FormatString(8))
+	}
+
+	switch order.Type {
+	case types.OrderTypeTakeProfitLimit:
+		orderReq.SetTpTriggerPxType("last")
+		orderReq.SetTpTriggerPx(order.Market.FormatPrice(order.Price))
+		orderReq.SetTpOrdPx(order.Market.FormatPrice(order.StopPrice))
+
+	case types.OrderTypeTakeProfitMarket:
+		orderReq.SetTpTriggerPxType("last")
+		orderReq.SetTpTriggerPx("-1")
+		orderReq.SetTpOrdPx(order.Market.FormatPrice(order.StopPrice))
+
+	case types.OrderTypeStopLimit:
+		orderReq.SetSlTriggerPxType("last")
+		orderReq.SetSlTriggerPx(order.Market.FormatPrice(order.Price))
+		orderReq.SetSlOrdPx(order.Market.FormatPrice(order.StopPrice))
+	case types.OrderTypeStopMarket:
+		orderReq.SetSlTriggerPxType("last")
+		orderReq.SetSlTriggerPx("-1")
+		orderReq.SetSlOrdPx(order.Market.FormatPrice(order.StopPrice))
+
+	}
+
+	switch order.TimeInForce {
+	case "FOK":
+		orderReq.OrderType(okexapi.OrderTypeFOK)
+	case "IOC":
+		orderReq.OrderType(okexapi.OrderTypeIOC)
+	default:
+		orderReq.OrderType(orderType)
+	}
+
+	if e.IsFutures {
+		orderReq.TradeMode("cross")
+		switch order.Side {
+		case types.SideTypeBuy:
+			if order.ReduceOnly {
+				orderReq.PosSide(okexapi.PosSideTypeSell)
+			} else {
+				orderReq.PosSide(okexapi.PosSideTypeBuy)
+			}
+		case types.SideTypeSell:
+			if order.ReduceOnly {
+				orderReq.PosSide(okexapi.PosSideTypeBuy)
+			} else {
+				orderReq.PosSide(okexapi.PosSideTypeSell)
+			}
+
+		}
+
+		if order.ReduceOnly {
+
+			fmt.Println("close ", order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+			orderReq.ReduceOnly(order.ReduceOnly)
+			orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+
+		} else {
+			orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+
+		}
+
+	} else {
+		orderReq.TgtCcy("base_ccy")
+		orderReq.TradeMode("cash")
+	}
+
+	orderReq.OrderType(okexapi.OrderTypeConditional)
+	orderHead, err := orderReq.Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	spew.Dump(orderHead)
+	var orderID int64
+	if orderHead.AlgoId != "" {
+		orderID, err = strconv.ParseInt(orderHead.AlgoId, 10, 64)
+
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		return nil, nil
+	}
 
-		for idx, orderHead := range orderHeads {
-			orderID, err := strconv.ParseInt(orderHead.OrderID, 10, 64)
-			if err != nil {
-				return createdOrder, err
-			}
+	return &types.Order{
+		SubmitOrder:      order,
+		Exchange:         types.ExchangeOKEx,
+		OrderID:          uint64(orderID),
+		Status:           types.OrderStatusNew,
+		ExecutedQuantity: fixedpoint.Zero,
+		IsWorking:        true,
+		CreationTime:     types.Time(time.Now()),
+		UpdateTime:       types.Time(time.Now()),
+		IsMargin:         false,
+		IsIsolated:       false,
+	}, nil
 
-			submitOrder := order[idx]
-			createdOrder = append(createdOrder, types.Order{
-				SubmitOrder:      submitOrder,
-				Exchange:         types.ExchangeOKEx,
-				OrderID:          uint64(orderID),
-				Status:           types.OrderStatusNew,
-				ExecutedQuantity: fixedpoint.Zero,
-				IsWorking:        true,
-				CreationTime:     types.Time(time.Now()),
-				UpdateTime:       types.Time(time.Now()),
-				IsMargin:         false,
-				IsIsolated:       false,
-			})
-		}
-	*/
 }
 
 func (e *Exchange) QueryOpenOrders(ctx context.Context, symbol string) (orders []types.Order, err error) {

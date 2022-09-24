@@ -5,6 +5,7 @@ package okexapi
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"net/url"
 )
 
@@ -132,7 +133,11 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 	params["sz"] = quantity
 	//params["tgtCcy"] = "base_ccy"
 	params["posSide"] = p.posSide
+	if len(p.tgtCcy)>0{
+		params["tgtCcy"] = p.tgtCcy
 
+	}
+	fmt.Println("p.price",p.price)
 	// check price field -> json key px
 	if p.price != nil {
 		price := *p.price
@@ -140,6 +145,7 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 		// assign parameter of price
 		params["px"] = price
 	}
+	fmt.Println(params)
 	if p.reduceOnly==true{
 		params["reduceOnly"]=true
 		if p.posSide==PosSideTypeBuy{
@@ -153,7 +159,7 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 	//params["px"] = 100
 	// params["ccy"] = "USDT"
 	//fmt.Println("fuck ni ma:", params)
-	//spew.Dump(params)
+	 spew.Dump(params)
 
 	return params, nil
 }

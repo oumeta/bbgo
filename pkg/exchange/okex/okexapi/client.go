@@ -39,8 +39,15 @@ const (
 type OrderType string
 
 const (
-	OrderTypeMarket   OrderType = "market"
-	OrderTypeLimit    OrderType = "limit"
+	OrderTypeMarket           OrderType = "market"
+	OrderTypeLimit            OrderType = "limit"
+	OrderTypeStopLimit        OrderType = "STOP_LIMIT"
+	OrderTypeStopMarket       OrderType = "STOP_MARKET"
+	OrderTypeTakeProfitLimit  OrderType = "TAKE_PROFIT_LIMIT"
+	OrderTypeTakeProfitMarket OrderType = "TAKE_PROFIT_MARKET"
+
+	OrderTypeConditional OrderType = "conditional"
+
 	OrderTypePostOnly OrderType = "post_only"
 	OrderTypeFOK      OrderType = "fok"
 	OrderTypeIOC      OrderType = "ioc"

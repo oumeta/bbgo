@@ -130,7 +130,7 @@ func long(exchange *binance.Exchange, market types.Market) {
 	}
 
 	fmt.Println("create----:\n", createdOrder)
-	exchange.CancelOrders(ctx,)
+	//exchange.CancelOrders(ctx,)
 	//限价单止赢
 
 	createdTackProfitOrder, err := exchange.SubmitOrder(ctx, types.SubmitOrder{
