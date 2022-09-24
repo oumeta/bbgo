@@ -1,6 +1,9 @@
 package bbgo
 
-import "github.com/c9s/bbgo/pkg/types"
+import (
+	"github.com/c9s/bbgo/pkg/types"
+	"time"
+)
 
 const MaxNumOfKLines = 5_000
 const MaxNumOfKLinesTruncate = 100
@@ -15,6 +18,7 @@ type MarketDataStore struct {
 
 	kLineWindowUpdateCallbacks []func(interval types.Interval, klines types.KLineWindow)
 	kLineClosedCallbacks       []func(k types.KLine)
+	kLineUpdateCallbacks       []func(k types.KLine)
 }
 
 func NewMarketDataStore(symbol string) *MarketDataStore {
@@ -38,6 +42,15 @@ func (store *MarketDataStore) KLinesOfInterval(interval types.Interval) (kLines 
 
 func (store *MarketDataStore) BindStream(stream types.Stream) {
 	stream.OnKLineClosed(store.handleKLineClosed)
+	stream.OnKLine(store.handleKLineUpdate)
+}
+
+func (store *MarketDataStore) handleKLineUpdate(kline types.KLine) {
+	if kline.Symbol != store.Symbol {
+		return
+	}
+
+	store.EmitKLine(kline)
 }
 
 func (store *MarketDataStore) handleKLineClosed(kline types.KLine) {
@@ -49,6 +62,14 @@ func (store *MarketDataStore) handleKLineClosed(kline types.KLine) {
 }
 
 func (store *MarketDataStore) AddKLine(k types.KLine) {
+
+	//确保没有关闭的k线不能被添加进去
+	isClosed := time.Now().After(k.EndTime.Time())
+	if !isClosed {
+		return
+	}
+	//fmt.Printf("nimade :%s,%s,%s,%s \n", k.Interval, k.StartTime, k.EndTime, k.Interval)
+
 	window, ok := store.KLineWindows[k.Interval]
 	if !ok {
 		var tmp = make(types.KLineWindow, 0, 1000)

@@ -224,6 +224,8 @@ type OpenPositionOptions struct {
 
 	Price fixedpoint.Value `json:"-" yaml:"-"`
 	Tags  []string         `json:"-" yaml:"-"`
+
+	Params map[string]interface{} `json:"params"`
 }
 
 func (e *GeneralOrderExecutor) reduceQuantityAndSubmitOrder(ctx context.Context, price fixedpoint.Value, submitOrder types.SubmitOrder) (types.OrderSlice, error) {
@@ -258,6 +260,7 @@ func (e *GeneralOrderExecutor) OpenPosition(ctx context.Context, options OpenPos
 		Type:             types.OrderTypeMarket,
 		MarginSideEffect: types.SideEffectTypeMarginBuy,
 		Tag:              strings.Join(options.Tags, ","),
+		Params:           options.Params,
 	}
 
 	baseBalance, _ := e.session.Account.Balance(e.position.Market.BaseCurrency)
@@ -283,6 +286,7 @@ func (e *GeneralOrderExecutor) OpenPosition(ctx context.Context, options OpenPos
 		submitOrder.Type = types.OrderTypeLimit
 		submitOrder.Price = price
 	}
+	submitOrder.ReduceOnly = false
 
 	quantity := options.Quantity
 

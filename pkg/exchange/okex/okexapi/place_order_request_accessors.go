@@ -32,6 +32,18 @@ func (p *PlaceOrderRequest) Side(side SideType) *PlaceOrderRequest {
 	p.side = side
 	return p
 }
+func (p *PlaceOrderRequest) PosSide(side PosSideType) *PlaceOrderRequest {
+	p.posSide = side
+	return p
+}
+func (p *PlaceOrderRequest) CCY(ccy string) *PlaceOrderRequest {
+	p.ccy = ccy
+	return p
+}
+func (p *PlaceOrderRequest) TgtCcy(tgtCcy string) *PlaceOrderRequest {
+	p.tgtCcy = tgtCcy
+	return p
+}
 
 func (p *PlaceOrderRequest) OrderType(orderType OrderType) *PlaceOrderRequest {
 	p.orderType = orderType
@@ -45,6 +57,10 @@ func (p *PlaceOrderRequest) Quantity(quantity string) *PlaceOrderRequest {
 
 func (p *PlaceOrderRequest) Price(price string) *PlaceOrderRequest {
 	p.price = &price
+	return p
+}
+func (p *PlaceOrderRequest) ReduceOnly(reduceOnly bool) *PlaceOrderRequest {
+	p.reduceOnly = reduceOnly
 	return p
 }
 
@@ -114,6 +130,8 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 
 	// assign parameter of quantity
 	params["sz"] = quantity
+	//params["tgtCcy"] = "base_ccy"
+	params["posSide"] = p.posSide
 
 	// check price field -> json key px
 	if p.price != nil {
@@ -122,6 +140,20 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 		// assign parameter of price
 		params["px"] = price
 	}
+	if p.reduceOnly==true{
+		params["reduceOnly"]=true
+		if p.posSide==PosSideTypeBuy{
+			params["posSide"]=PosSideTypeSell
+		}else{
+			params["posSide"]=PosSideTypeBuy
+
+		}
+
+	}
+	//params["px"] = 100
+	// params["ccy"] = "USDT"
+	//fmt.Println("fuck ni ma:", params)
+	//spew.Dump(params)
 
 	return params, nil
 }

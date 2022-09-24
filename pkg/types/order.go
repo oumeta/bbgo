@@ -135,7 +135,8 @@ type SubmitOrder struct {
 	ReduceOnly    bool `json:"reduceOnly" db:"reduce_only"`
 	ClosePosition bool `json:"closePosition" db:"close_position"`
 
-	Tag string `json:"tag" db:"-"`
+	Tag    string                 `json:"tag" db:"-"`
+	Params map[string]interface{} `json:"params"`
 }
 
 func (o *SubmitOrder) In() (fixedpoint.Value, string) {

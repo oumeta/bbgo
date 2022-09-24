@@ -84,12 +84,17 @@ type PlaceOrderRequest struct {
 	// "buy" or "sell"
 	side SideType `param:"side" validValues:"buy,sell"`
 
+	posSide PosSideType `param:"posSide" validValues:"long,short"`
+
 	orderType OrderType `param:"ordType"`
 
 	quantity string `param:"sz"`
+	ccy      string `param:"ccy"`
+	tgtCcy   string `param:"tgtCcy"`
 
 	// price
-	price *string `param:"px"`
+	price      *string `param:"px"`
+	reduceOnly bool    `param:"reduceOnly"`
 }
 
 func (r *PlaceOrderRequest) Parameters() map[string]interface{} {
@@ -287,7 +292,8 @@ type OrderDetails struct {
 
 	// Currency = Margin currency
 	// Only applicable to cross MARGIN orders in Single-currency margin.
-	Currency string `json:"ccy"`
+	Currency     string `json:"ccy"`
+	BaseCurrency string `json:"tgtCcy"`
 
 	// Leverage = from 0.01 to 125.
 	// Only applicable to MARGIN/FUTURES/SWAP
