@@ -2,6 +2,8 @@ package okex
 
 import (
 	"context"
+	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"math"
 	"strconv"
 	"time"
@@ -24,7 +26,15 @@ var log = logrus.WithFields(logrus.Fields{
 	"exchange": "okex",
 })
 
+func init() {
+	_ = types.Exchange(&Exchange{})
+	_ = types.MarginExchange(&Exchange{})
+	_ = types.FuturesExchange(&Exchange{})
+}
+
 type Exchange struct {
+	types.MarginSettings
+	types.FuturesSettings
 	key, secret, passphrase string
 
 	client *okexapi.RestClient
@@ -51,12 +61,22 @@ func (e *Exchange) Name() types.ExchangeName {
 }
 
 func (e *Exchange) QueryMarkets(ctx context.Context) (types.MarketMap, error) {
-	instruments, err := e.client.PublicDataService.NewGetInstrumentsRequest().
-		InstrumentType(okexapi.InstrumentTypeSpot).
-		Do(ctx)
+	var instruments = []okexapi.Instrument{}
 
-	if err != nil {
-		return nil, err
+	if e.IsFutures {
+		instruments, _ = e.client.PublicDataService.NewGetInstrumentsRequest().
+			InstrumentType(okexapi.InstrumentTypeSwap).
+			Do(ctx)
+		//if err != nil {
+		//	return nil, err
+		//}
+	} else {
+		instruments, _ = e.client.PublicDataService.NewGetInstrumentsRequest().
+			InstrumentType(okexapi.InstrumentTypeSpot).
+			Do(ctx)
+		//if err != nil {
+		//	return nil, err
+		//}
 	}
 
 	markets := types.MarketMap{}
@@ -85,7 +105,15 @@ func (e *Exchange) QueryMarkets(ctx context.Context) (types.MarketMap, error) {
 			// OKEx does not offer minimal notional, use 1 USD here.
 			MinNotional: fixedpoint.One,
 			MinAmount:   fixedpoint.One,
+
+			CtVal: fixedpoint.MustNewFromString(instrument.ContractValue),
 		}
+
+		if e.IsFutures {
+			market.QuoteCurrency = instrument.SettleCurrency
+			market.BaseCurrency = instrument.ContractValueCurrency
+		}
+
 		markets[symbol] = market
 	}
 
@@ -104,7 +132,12 @@ func (e *Exchange) QueryTicker(ctx context.Context, symbol string) (*types.Ticke
 }
 
 func (e *Exchange) QueryTickers(ctx context.Context, symbols ...string) (map[string]types.Ticker, error) {
-	marketTickers, err := e.client.MarketTickers(okexapi.InstrumentTypeSpot)
+	instrumentType := okexapi.InstrumentTypeSpot
+	if e.IsFutures {
+		instrumentType = okexapi.InstrumentTypeFutures
+	}
+
+	marketTickers, err := e.client.MarketTickers(instrumentType)
 	if err != nil {
 		return nil, err
 	}
@@ -160,12 +193,22 @@ func (e *Exchange) QueryAccountBalances(ctx context.Context) (types.BalanceMap, 
 }
 
 func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*types.Order, error) {
-	orderReq := e.client.TradeService.NewPlaceOrderRequest()
 
 	orderType, err := toLocalOrderType(order.Type)
 	if err != nil {
 		return nil, err
 	}
+
+	switch order.Type {
+	case types.OrderTypeTakeProfitLimit, types.OrderTypeTakeProfitMarket, types.OrderTypeStopLimit, types.OrderTypeStopMarket:
+
+		createdOrder, err := e.SubmitAlgoOrder(ctx, order)
+		return createdOrder, err
+	}
+	fmt.Println("fuck2")
+
+	orderReq := e.client.TradeService.NewPlaceOrderRequest()
+	param := order.Params
 
 	orderReq.InstrumentID(toLocalSymbol(order.Symbol))
 	orderReq.Side(toLocalSideType(order.Side))
@@ -177,15 +220,25 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 		orderReq.Quantity(order.Quantity.FormatString(8))
 	}
 
+	fmt.Println("order.Market.FormatPrice(order.Price)", order.Market.FormatPrice(order.Price))
 	// set price field for limit orders
 	switch order.Type {
-	case types.OrderTypeStopLimit, types.OrderTypeLimit:
+	case types.OrderTypeStopLimit, types.OrderTypeLimit, types.OrderTypeLimitMaker:
 		if order.Market.Symbol != "" {
+			fmt.Println(33)
 			orderReq.Price(order.Market.FormatPrice(order.Price))
 		} else {
 			// TODO report error
+			fmt.Println(444)
 			orderReq.Price(order.Price.FormatString(8))
 		}
+	case types.OrderTypeMarket, types.OrderTypeStopMarket, types.OrderTypeTakeProfitMarket:
+		//okex 市价交易的，货币类型
+		if !e.IsFutures {
+			orderReq.TgtCcy("base_ccy")
+			fmt.Println("afdadfs")
+		}
+
 	}
 
 	switch order.TimeInForce {
@@ -197,14 +250,68 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 		orderReq.OrderType(orderType)
 	}
 
+	if order.Params != nil {
+		if param["tdMode"] != nil {
+			orderReq.TradeMode(param["tdMode"].(string))
+
+		}
+		if param["instId"] != nil {
+			orderReq.InstrumentID(param["instId"].(string))
+
+		}
+		//orderReq.InstrumentID(param["instId"].(string))
+		if param["ccy"] != nil {
+			orderReq.CCY(param["ccy"].(string))
+
+		}
+
+	}
+
+	if e.IsFutures {
+		side := okexapi.PosSideTypeBuy
+		if order.Side == types.SideTypeBuy {
+			side = okexapi.PosSideTypeBuy
+		}
+		if order.Side == types.SideTypeSell {
+			side = okexapi.PosSideTypeSell
+		}
+
+		orderReq.PosSide(side)
+		orderReq.TradeMode("cross")
+		//
+		if order.ReduceOnly {
+
+			fmt.Println("close ", order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+			orderReq.ReduceOnly(order.ReduceOnly)
+			orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+
+		} else {
+			orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+
+		}
+
+	} else {
+		orderReq.TgtCcy("base_ccy")
+		orderReq.TradeMode("cash")
+	}
+	//
+
+	//orderReq("cash")
+	fmt.Println(3333)
 	orderHead, err := orderReq.Do(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	orderID, err := strconv.ParseInt(orderHead.OrderID, 10, 64)
-	if err != nil {
-		return nil, err
+	var orderID int64
+	if orderHead.OrderID != "" {
+		orderID, err = strconv.ParseInt(orderHead.OrderID, 10, 64)
+
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, nil
 	}
 
 	return &types.Order{
@@ -220,36 +327,121 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 		IsIsolated:       false,
 	}, nil
 
-	// TODO: move this to batch place orders interface
-	/*
-		batchReq := e.client.TradeService.NewBatchPlaceOrderRequest()
-		batchReq.Add(reqs...)
-		orderHeads, err := batchReq.Do(ctx)
+}
+func (e *Exchange) SubmitAlgoOrder(ctx context.Context, order types.SubmitOrder) (*types.Order, error) {
+
+	orderReq := e.client.TradeService.NewPlaceAlgoOrderRequest()
+
+	orderType, err := toLocalOrderType(order.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	orderReq.InstrumentID(toLocalSymbol(order.Symbol))
+	orderReq.Side(toLocalSideType(order.Side))
+
+	if order.Market.Symbol != "" {
+		orderReq.Quantity(order.Market.FormatQuantity(order.Quantity))
+	} else {
+
+		orderReq.Quantity(order.Quantity.FormatString(8))
+	}
+
+	switch order.Type {
+	case types.OrderTypeTakeProfitLimit:
+		orderReq.SetTpTriggerPxType("last")
+		orderReq.SetTpTriggerPx(order.Market.FormatPrice(order.Price))
+		orderReq.SetTpOrdPx(order.Market.FormatPrice(order.StopPrice))
+
+	case types.OrderTypeTakeProfitMarket:
+		orderReq.SetTpTriggerPxType("last")
+		orderReq.SetTpTriggerPx("-1")
+		orderReq.SetTpOrdPx(order.Market.FormatPrice(order.StopPrice))
+
+	case types.OrderTypeStopLimit:
+		orderReq.SetSlTriggerPxType("last")
+		orderReq.SetSlTriggerPx(order.Market.FormatPrice(order.Price))
+		orderReq.SetSlOrdPx(order.Market.FormatPrice(order.StopPrice))
+	case types.OrderTypeStopMarket:
+		orderReq.SetSlTriggerPxType("last")
+		orderReq.SetSlTriggerPx("-1")
+		orderReq.SetSlOrdPx(order.Market.FormatPrice(order.StopPrice))
+
+	}
+
+	switch order.TimeInForce {
+	case "FOK":
+		orderReq.OrderType(okexapi.OrderTypeFOK)
+	case "IOC":
+		orderReq.OrderType(okexapi.OrderTypeIOC)
+	default:
+		orderReq.OrderType(orderType)
+	}
+
+	if e.IsFutures {
+		orderReq.TradeMode("cross")
+		switch order.Side {
+		case types.SideTypeBuy:
+			if order.ReduceOnly {
+				orderReq.PosSide(okexapi.PosSideTypeSell)
+			} else {
+				orderReq.PosSide(okexapi.PosSideTypeBuy)
+			}
+		case types.SideTypeSell:
+			if order.ReduceOnly {
+				orderReq.PosSide(okexapi.PosSideTypeBuy)
+			} else {
+				orderReq.PosSide(okexapi.PosSideTypeSell)
+			}
+
+		}
+
+		if order.ReduceOnly {
+
+			fmt.Println("close ", order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+			orderReq.ReduceOnly(order.ReduceOnly)
+			orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+
+		} else {
+			orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+
+		}
+
+	} else {
+		orderReq.TgtCcy("base_ccy")
+		orderReq.TradeMode("cash")
+	}
+
+	orderReq.OrderType(okexapi.OrderTypeConditional)
+	orderHead, err := orderReq.Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	spew.Dump(orderHead)
+	var orderID int64
+	if orderHead.AlgoId != "" {
+		orderID, err = strconv.ParseInt(orderHead.AlgoId, 10, 64)
+
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		return nil, nil
+	}
 
-		for idx, orderHead := range orderHeads {
-			orderID, err := strconv.ParseInt(orderHead.OrderID, 10, 64)
-			if err != nil {
-				return createdOrder, err
-			}
+	return &types.Order{
+		SubmitOrder:      order,
+		Exchange:         types.ExchangeOKEx,
+		OrderID:          uint64(orderID),
+		Status:           types.OrderStatusNew,
+		ExecutedQuantity: fixedpoint.Zero,
+		IsWorking:        true,
+		CreationTime:     types.Time(time.Now()),
+		UpdateTime:       types.Time(time.Now()),
+		IsMargin:         false,
+		IsIsolated:       false,
+	}, nil
 
-			submitOrder := order[idx]
-			createdOrder = append(createdOrder, types.Order{
-				SubmitOrder:      submitOrder,
-				Exchange:         types.ExchangeOKEx,
-				OrderID:          uint64(orderID),
-				Status:           types.OrderStatusNew,
-				ExecutedQuantity: fixedpoint.Zero,
-				IsWorking:        true,
-				CreationTime:     types.Time(time.Now()),
-				UpdateTime:       types.Time(time.Now()),
-				IsMargin:         false,
-				IsIsolated:       false,
-			})
-		}
-	*/
 }
 
 func (e *Exchange) QueryOpenOrders(ctx context.Context, symbol string) (orders []types.Order, err error) {
@@ -327,6 +519,7 @@ func (e *Exchange) QueryKLines(ctx context.Context, symbol string, interval type
 			High:        candle.High,
 			Low:         candle.Low,
 			Close:       candle.Close,
+			LastTradeID: 0,
 			Closed:      true,
 			Volume:      candle.Volume,
 			QuoteVolume: candle.VolumeInCurrency,
@@ -334,6 +527,7 @@ func (e *Exchange) QueryKLines(ctx context.Context, symbol string, interval type
 			EndTime:     types.Time(candle.Time.Add(interval.Duration() - time.Millisecond)),
 		})
 	}
+	klines = types.SortKLinesAscending(klines)
 
 	return klines, nil
 

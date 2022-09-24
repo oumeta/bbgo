@@ -5,6 +5,7 @@ package okexapi
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"net/url"
 )
 
@@ -32,6 +33,18 @@ func (p *PlaceOrderRequest) Side(side SideType) *PlaceOrderRequest {
 	p.side = side
 	return p
 }
+func (p *PlaceOrderRequest) PosSide(side PosSideType) *PlaceOrderRequest {
+	p.posSide = side
+	return p
+}
+func (p *PlaceOrderRequest) CCY(ccy string) *PlaceOrderRequest {
+	p.ccy = ccy
+	return p
+}
+func (p *PlaceOrderRequest) TgtCcy(tgtCcy string) *PlaceOrderRequest {
+	p.tgtCcy = tgtCcy
+	return p
+}
 
 func (p *PlaceOrderRequest) OrderType(orderType OrderType) *PlaceOrderRequest {
 	p.orderType = orderType
@@ -45,6 +58,10 @@ func (p *PlaceOrderRequest) Quantity(quantity string) *PlaceOrderRequest {
 
 func (p *PlaceOrderRequest) Price(price string) *PlaceOrderRequest {
 	p.price = &price
+	return p
+}
+func (p *PlaceOrderRequest) ReduceOnly(reduceOnly bool) *PlaceOrderRequest {
+	p.reduceOnly = reduceOnly
 	return p
 }
 
@@ -114,7 +131,13 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 
 	// assign parameter of quantity
 	params["sz"] = quantity
+	//params["tgtCcy"] = "base_ccy"
+	params["posSide"] = p.posSide
+	if len(p.tgtCcy)>0{
+		params["tgtCcy"] = p.tgtCcy
 
+	}
+	fmt.Println("p.price",p.price)
 	// check price field -> json key px
 	if p.price != nil {
 		price := *p.price
@@ -122,6 +145,21 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 		// assign parameter of price
 		params["px"] = price
 	}
+	fmt.Println(params)
+	if p.reduceOnly==true{
+		params["reduceOnly"]=true
+		if p.posSide==PosSideTypeBuy{
+			params["posSide"]=PosSideTypeSell
+		}else{
+			params["posSide"]=PosSideTypeBuy
+
+		}
+
+	}
+	//params["px"] = 100
+	// params["ccy"] = "USDT"
+	//fmt.Println("fuck ni ma:", params)
+	 spew.Dump(params)
 
 	return params, nil
 }

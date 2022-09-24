@@ -92,6 +92,8 @@ type Market struct {
 
 	// TickSize is the step size of price
 	TickSize fixedpoint.Value `json:"tickSize,omitempty"`
+
+	CtVal fixedpoint.Value `json:"ctVal,omitempty"`
 }
 
 func (m Market) IsDustQuantity(quantity, price fixedpoint.Value) bool {

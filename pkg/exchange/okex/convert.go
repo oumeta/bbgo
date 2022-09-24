@@ -18,6 +18,7 @@ func toGlobalSymbol(symbol string) string {
 }
 
 // //go:generate sh -c "echo \"package okex\nvar spotSymbolMap = map[string]string{\n\" $(curl -s -L 'https://okex.com/api/v5/public/instruments?instType=SPOT' | jq -r '.data[] | \"\\(.instId | sub(\"-\" ; \"\") | tojson ): \\( .instId | tojson),\n\"') \"\n}\" > symbols.go"
+//
 //go:generate go run gensymbols.go
 func toLocalSymbol(symbol string) string {
 	if s, ok := spotSymbolMap[symbol]; ok {
@@ -103,6 +104,11 @@ func convertSubscription(s types.Subscription) (WebsocketSubscription, error) {
 	case types.BookTickerChannel:
 		return WebsocketSubscription{
 			Channel:      "books5",
+			InstrumentID: toLocalSymbol(s.Symbol),
+		}, nil
+	case types.MarketTradeChannel:
+		return WebsocketSubscription{
+			Channel:      "trades",
 			InstrumentID: toLocalSymbol(s.Symbol),
 		}, nil
 	}
@@ -240,16 +246,27 @@ func toGlobalOrderStatus(state okexapi.OrderState) (types.OrderStatus, error) {
 }
 
 func toLocalOrderType(orderType types.OrderType) (okexapi.OrderType, error) {
-	switch orderType {
-	case types.OrderTypeMarket:
-		return okexapi.OrderTypeMarket, nil
 
-	case types.OrderTypeLimit:
-		return okexapi.OrderTypeLimit, nil
+	switch orderType {
 
 	case types.OrderTypeLimitMaker:
 		return okexapi.OrderTypePostOnly, nil
 
+	case types.OrderTypeLimit:
+		return okexapi.OrderTypeLimit, nil
+	case types.OrderTypeTakeProfitLimit:
+		return okexapi.OrderTypeTakeProfitLimit, nil
+	case types.OrderTypeTakeProfitMarket:
+		return okexapi.OrderTypeTakeProfitMarket, nil
+
+	case types.OrderTypeStopLimit:
+		return okexapi.OrderTypeStopLimit, nil
+
+	case types.OrderTypeStopMarket:
+		return okexapi.OrderTypeStopMarket, nil
+
+	case types.OrderTypeMarket:
+		return okexapi.OrderTypeMarket, nil
 	}
 
 	return "", fmt.Errorf("unknown or unsupported okex order type: %s", orderType)
