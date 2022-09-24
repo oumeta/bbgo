@@ -1,0 +1,30 @@
+//@version=5
+// Copyright (c) 2019-present, Franklin Moormann (cheatcountry)
+// Ehlers Kaufman Adaptive Moving Average [CC] script may be freely distributed under the MIT license.
+indicator('Ehlers Kaufman Adaptive Moving Average [CC]', overlay=true)
+
+inp = input(title='Source', defval=close)
+res = input.timeframe(title='Resolution', defval='')
+rep = input(title='Allow Repainting?', defval=false)
+bar = input(title='Allow Bar Color Change?', defval=true)
+src = request.security(syminfo.tickerid, res, inp[rep ? 0 : barstate.isrealtime ? 1 : 0])[rep ? 0 : barstate.isrealtime ? 0 : 1]
+length = input.int(title='Length', defval=20, minval=1)
+
+deltaSum = 0.0
+for int i = 0 to length - 1 by 1
+    deltaSum += math.abs(nz(src[i]) - nz(src[i + 1]))
+ef = deltaSum != 0 ? math.min(math.abs(src - nz(src[length - 1])) / deltaSum, 1) : 0
+s = math.pow((0.6667 * ef) + 0.0645, 2)
+
+kama = 0.0
+kama := (s * src) + ((1 - s) * nz(kama[1]))
+
+slo = src - kama
+sig = slo > 0 ? slo > nz(slo[1]) ? 2 : 1 : slo < 0 ? slo < nz(slo[1]) ? -2 : -1 : 0
+alertcondition(ta.crossover(sig, 1), 'Strong Buy Signal', 'Strong Bullish Change Detected')
+alertcondition(ta.crossunder(sig, -1), 'Strong Sell Signal', 'Strong Bearish Change Detected')
+alertcondition(ta.crossover(sig, 0), 'Buy Signal', 'Bullish Change Detected')
+alertcondition(ta.crossunder(sig, 0), 'Sell Signal', 'Bearish Change Detected')
+kamaColor = sig > 1 ? color.green : sig > 0 ? color.lime : sig < -1 ? color.maroon : sig < 0 ? color.red : color.black
+barcolor(bar ? kamaColor : na)
+plot(kama, title='Filter', color=kamaColor, linewidth=2)
