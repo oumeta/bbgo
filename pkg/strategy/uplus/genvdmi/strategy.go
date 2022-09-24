@@ -1,10 +1,11 @@
-package drift
+package genvdmi
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/c9s/bbgo/pkg/strategy/uplus/indi"
 	"math"
 	"os"
 	"strconv"
@@ -23,7 +24,7 @@ import (
 	"github.com/c9s/bbgo/pkg/util"
 )
 
-const ID = "drift"
+const ID = "genvdmi"
 
 var log = logrus.WithField("strategy", ID)
 var Four fixedpoint.Value = fixedpoint.NewFromInt(4)
@@ -31,6 +32,10 @@ var Three fixedpoint.Value = fixedpoint.NewFromInt(3)
 var Two fixedpoint.Value = fixedpoint.NewFromInt(2)
 var Delta fixedpoint.Value = fixedpoint.NewFromFloat(0.01)
 var Fee = 0.0008 // taker fee % * 2, for upper bound
+var BUY = "1"
+var SELL = "-1"
+var HOLD = "0"
+var holdingMax = 5
 
 func init() {
 	bbgo.RegisterStrategy(ID, &Strategy{})
@@ -52,13 +57,12 @@ type Strategy struct {
 
 	p *types.Position
 
-	priceLines          *types.Queue
-	trendLine           types.UpdatableSeriesExtend
-	ma                  types.UpdatableSeriesExtend
-	stdevHigh           *indicator.StdDev
-	stdevLow            *indicator.StdDev
-	drift               *DriftMA
-	drift1m             *DriftMA
+	priceLines *types.Queue
+	trendLine  types.UpdatableSeriesExtend
+	ma         types.UpdatableSeriesExtend
+	stdevHigh  *indicator.StdDev
+	stdevLow   *indicator.StdDev
+
 	atr                 *indicator.ATR
 	midPrice            fixedpoint.Value
 	lock                sync.RWMutex `ignore:"true"`
@@ -114,6 +118,51 @@ type Strategy struct {
 	*bbgo.GeneralOrderExecutor
 
 	getLastPrice func() fixedpoint.Value
+
+	WindowATR   int              `json:"windowATR"`
+	WindowATR2  int              `json:"windowATR2"`
+	WindowRSI   int              `json:"windowRSI"`
+	WindowCCI   int              `json:"windowCCI"`
+	WindowHMA   int              `json:"windowHMA"`
+	WindowALMA  int              `json:"windowALMA"`
+	WindowMACD  int              `json:"windowMACD"`
+	WindowSTOCH int              `json:"windowSTOCH"`
+	WindowDmi   int              `json:"windowDMI"`
+	WindowQuick int              `json:"windowQuick"`
+	WindowSlow  fixedpoint.Value `json:"windowSlow,omitempty"`
+	WindowDEMA  fixedpoint.Value `json:"windowDEMA,omitempty"`
+	WindowST    int              `json:"windowSt"`
+	MaType      string           `json:"maType,omitempty"`
+	//ewo        *ElliottWave
+	emaFast *indicator.EWMA
+	emaSlow *indicator.EWMA
+	alma    *indicator.ALMA
+	dema    *indicator.DEMA
+	sma     *indicator.SMA
+
+	// SuperTrend indicator
+	Supertrend *indicator.Supertrend
+	// SupertrendMultiplier ATR multiplier for calculation of supertrend
+	SupertrendMultiplier float64 `json:"supertrendMultiplier"`
+
+	macd *DEMACD
+
+	rsi            *indicator.RSI
+	cci            *indicator.CCI
+	dmi            *indicator.DMI
+	hma            *indi.HMA
+	hull           *indicator.HULL
+	change         *indi.Slice
+	holdingCounter int
+
+	atr2  *indicator.ATR
+	stoch *indicator.STOCH
+
+	currentTakeProfitPrice fixedpoint.Value
+	currentStopLossPrice   fixedpoint.Value
+
+	// TakeProfitAtrMultiplier TP according to ATR multiple, 0 to disable this
+	TakeProfitAtrMultiplier float64 `json:"takeProfitAtrMultiplier"`
 }
 
 func (s *Strategy) ID() string {
@@ -125,18 +174,11 @@ func (s *Strategy) InstanceID() string {
 }
 
 func (s *Strategy) Subscribe(session *bbgo.ExchangeSession) {
-	// by default, bbgo only pre-subscribe 1000 klines.
-	// this is not enough if we're subscribing 30m intervals using SerialMarketDataStore
-	maxWindow := (s.Window + s.SmootherWindow + s.FisherTransformWindow) * s.Interval.Minutes()
-	maxWindow1m := s.Window1m + s.SmootherWindow1m + s.FisherTransformWindow1m
-	if maxWindow < maxWindow1m {
-		maxWindow = maxWindow1m
-	}
-	bbgo.KLinePreloadLimit = int64((maxWindow/1000 + 1) * 1000)
-	log.Errorf("set kLinePreloadLimit to %d, %d %d", bbgo.KLinePreloadLimit, s.Interval.Minutes(), maxWindow)
+
 	session.Subscribe(types.KLineChannel, s.Symbol, types.SubscribeOptions{
 		Interval: types.Interval1m,
 	})
+	session.Subscribe(types.KLineChannel, s.Symbol, types.SubscribeOptions{Interval: s.Interval})
 
 	if !bbgo.IsBackTesting {
 		session.Subscribe(types.BookTickerChannel, s.Symbol, types.SubscribeOptions{})
@@ -182,79 +224,145 @@ func (s *Strategy) ClosePosition(ctx context.Context, percentage fixedpoint.Valu
 	}
 }
 
-func (s *Strategy) initIndicators(store *bbgo.SerialMarketDataStore) error {
+func (s *Strategy) initIndicators(store *bbgo.MarketDataStore) error {
+	s.change = &indi.Slice{}
 	s.ma = &indicator.SMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.HLRangeWindow}}
 	s.stdevHigh = &indicator.StdDev{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.HLRangeWindow}}
 	s.stdevLow = &indicator.StdDev{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.HLRangeWindow}}
-	s.drift = &DriftMA{
-		drift: &indicator.WeightedDrift{
-			MA:             &indicator.SMA{IntervalWindow: s.IntervalWindow},
-			IntervalWindow: s.IntervalWindow,
-		},
-		ma1: &indicator.EWMA{
-			IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.SmootherWindow},
-		},
-		ma2: &indicator.FisherTransform{
-			IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.FisherTransformWindow},
-		},
-	}
-	s.drift.SeriesBase.Series = s.drift
-	s.drift1m = &DriftMA{
-		drift: &indicator.WeightedDrift{
-			MA:             &indicator.SMA{IntervalWindow: types.IntervalWindow{Interval: types.Interval1m, Window: s.Window1m}},
-			IntervalWindow: types.IntervalWindow{Interval: types.Interval1m, Window: s.Window1m},
-		},
-		ma1: &indicator.EWMA{
-			IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.SmootherWindow1m},
-		},
-
-		ma2: &indicator.FisherTransform{
-			IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.FisherTransformWindow1m},
-		},
-	}
-	s.drift1m.SeriesBase.Series = s.drift1m
-	s.atr = &indicator.ATR{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.ATRWindow}}
 	s.trendLine = &indicator.EWMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.TrendWindow}}
 
-	klines, ok := store.KLinesOfInterval(s.Interval)
-	klinesLength := len(*klines)
-	if !ok || klinesLength == 0 {
-		return errors.New("klines not exists")
+	s.emaFast = &indicator.EWMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowSlow.Int()}}
+	s.emaSlow = &indicator.EWMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowQuick}}
+	s.dmi = &indicator.DMI{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowDmi}, ADXSmoothing: s.WindowDmi}
+	s.trendLine = &indicator.EWMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.TrendWindow}}
+
+	s.stoch = &indicator.STOCH{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowSTOCH}}
+
+	s.atr = &indicator.ATR{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowATR}}
+	s.atr2 = &indicator.ATR{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowATR2}}
+	s.rsi = &indicator.RSI{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowRSI}}
+	s.cci = &indicator.CCI{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowCCI}}
+	s.alma = &indicator.ALMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowSlow.Int()}, Offset: 0.775, Sigma: 5}
+	s.dema = &indicator.DEMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowSlow.Int()}}
+	s.sma = &indicator.SMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowSlow.Int()}}
+	s.hull = &indicator.HULL{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowSlow.Int()}}
+
+	s.macd = &DEMACD{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowMACD}, ShortPeriod: 12, LongPeriod: 26, DeaPeriod: 9, MaType: "EWMA"}
+
+	s.hma = &indi.HMA{IntervalWindow: types.IntervalWindow{Interval: s.Interval, Window: s.WindowHMA}}
+
+	if s.SupertrendMultiplier == 0 {
+		s.SupertrendMultiplier = 3
 	}
-	log.Infof("loaded %d klines", klinesLength)
-	for _, kline := range *klines {
-		source := s.GetSource(&kline).Float64()
-		high := kline.High.Float64()
-		low := kline.Low.Float64()
-		s.ma.Update(source)
-		s.stdevHigh.Update(high - s.ma.Last())
-		s.stdevLow.Update(s.ma.Last() - low)
-		s.drift.Update(source, kline.Volume.Abs().Float64())
-		s.trendLine.Update(source)
-		s.atr.PushK(kline)
-		s.priceLines.Update(source)
+	s.Supertrend = &indicator.Supertrend{IntervalWindow: types.IntervalWindow{Window: s.WindowST, Interval: s.Interval}, ATRMultiplier: s.SupertrendMultiplier}
+	s.Supertrend.AverageTrueRange = &indicator.ATR{IntervalWindow: types.IntervalWindow{Window: s.WindowST, Interval: s.Interval}}
+	s.Supertrend.BindK(s.Session.MarketDataStream, s.Symbol, s.Supertrend.Interval)
+
+	klines, ok := store.KLinesOfInterval(s.Interval)
+	klineLength := len(*klines)
+	if !ok || klineLength == 0 {
+		return errors.New("klines not exists")
 	}
 	if s.frameKLine != nil && klines != nil {
 		s.frameKLine.Set(&(*klines)[len(*klines)-1])
 	}
-	klines, ok = store.KLinesOfInterval(types.Interval1m)
-	klinesLength = len(*klines)
-	if !ok || klinesLength == 0 {
-		return errors.New("klines not exists")
-	}
-	log.Infof("loaded %d klines1m", klinesLength)
 	for _, kline := range *klines {
-		source := s.GetSource(&kline).Float64()
-		s.drift1m.Update(source, kline.Volume.Abs().Float64())
-		if s.drift1m.Last() != s.drift1m.Last() {
-			panic(fmt.Sprintf("%f %v %f %f", source, s.drift1m.drift.Values.Index(1), s.drift1m.ma2.Last(), s.drift1m.drift.LastValue))
-		}
+		s.AddKline(kline)
+
 	}
-	if s.kline1m != nil && klines != nil {
-		s.kline1m.Set(&(*klines)[len(*klines)-1])
-	}
-	s.startTime = s.kline1m.StartTime.Time().Add(s.kline1m.Interval.Duration())
+
+	//s.Supertrend.LoadK((*klines)[0:])
 	return nil
+}
+
+func (s *Strategy) AddKline(kline types.KLine) {
+	source := s.GetSource(&kline).Float64()
+	high := kline.High.Float64()
+	low := kline.Low.Float64()
+	s.ma.Update(source)
+	s.stdevHigh.Update(high - s.ma.Last())
+	s.stdevLow.Update(s.ma.Last() - low)
+
+	s.atr.PushK(kline)
+	s.atr2.PushK(kline)
+
+	s.rsi.Update(kline.Volume.Float64())
+	s.hma.Update(s.rsi.Last())
+
+	s.cci.PushK(kline)
+
+	s.alma.Update(source)
+	s.emaFast.PushK(kline)
+	s.emaSlow.PushK(kline)
+	s.dema.PushK(kline)
+	s.sma.PushK(kline)
+	s.hull.PushK(kline)
+
+	s.stoch.PushK(kline)
+
+	s.dmi.PushK(kline)
+	s.macd.PushK(kline)
+	s.Supertrend.PushK(kline)
+
+	s.trendLine.Update(source)
+
+	s.priceLines.Update(source)
+
+	//fmt.Println(kline)
+	//stSignal := s.Supertrend.GetSignal()
+
+	//fmt.Printf("macd %.4f dif：%.4f,dea %.4f   \n", s.macd.Last(), s.macd.Dif.Last(), s.macd.Dea.Last())
+	//fmt.Printf("stsignal %d spv：%.4f,spatr %.4f   \n", stSignal, s.Supertrend.Last(), s.Supertrend.AverageTrueRange.Last())
+
+	//fmt.Printf("rsi %.4f cci：%.4f,atr %.4f  \n", s.rsi.Last(), s.cci.Last(), s.atr.Last())
+	//fmt.Printf("rsi %.4f cci：%.4f,atr %.4f  \n", s.rsi.Last(), s.cci.Last(), s.atr.Last())
+	//fmt.Printf("time%s,close%.4f,dip:%.4f,dim:%.4f,adx:%.4f\n", kline.EndTime, kline.Close.Float64(), s.dmi.GetDIPlus().Last(), s.dmi.GetDIMinus().Last(), s.dmi.GetADX().Last())
+	//fmt.Printf("ema:%.4f,hma:%.4f \n", s.emaSlow.Last(), s.hma.Last())
+	//fmt.Printf("hma:%.4f,rsi:%.4f \n", s.hma.Last(), s.rsi.Last())
+	//fmt.Printf("atr1:%.4f,atr2:%.4f  \n", s.atr.Last(), s.atr2.Last())
+}
+func (s *Strategy) UpdateKline(kline types.KLine) {
+	source := s.GetSource(&kline).Float64()
+
+	s.ma.Update(source)
+
+	s.atr.PushK(kline)
+	s.atr2.PushK(kline)
+
+	s.rsi.Update(kline.Volume.Float64())
+	s.hma.Update(s.rsi.Last())
+
+	s.cci.PushK(kline)
+
+	s.alma.Update(source)
+	s.emaFast.PushK(kline)
+	s.emaSlow.PushK(kline)
+	s.dema.PushK(kline)
+	s.sma.PushK(kline)
+	s.hull.PushK(kline)
+
+	s.stoch.PushK(kline)
+
+	s.dmi.PushK(kline)
+	s.macd.PushK(kline)
+	s.Supertrend.PushK(kline)
+
+	s.trendLine.Update(source)
+
+	s.priceLines.Update(source)
+	s.frameKLine.Set(&kline)
+	//fmt.Println(kline)
+	//stSignal := s.Supertrend.GetSignal()
+
+	//fmt.Printf("macd %.4f dif：%.4f,dea %.4f   \n", s.macd.Last(), s.macd.Dif.Last(), s.macd.Dea.Last())
+	//fmt.Printf("stsignal %d spv：%.4f,spatr %.4f   \n", stSignal, s.Supertrend.Last(), s.Supertrend.AverageTrueRange.Last())
+
+	//fmt.Printf("rsi %.4f cci：%.4f,atr %.4f  \n", s.rsi.Last(), s.cci.Last(), s.atr.Last())
+	//fmt.Printf("rsi %.4f cci：%.4f,atr %.4f  \n", s.rsi.Last(), s.cci.Last(), s.atr.Last())
+	//fmt.Printf("time%s,close%.4f,dip:%.4f,dim:%.4f,adx:%.4f\n", kline.EndTime, kline.Close.Float64(), s.dmi.GetDIPlus().Last(), s.dmi.GetDIMinus().Last(), s.dmi.GetADX().Last())
+	//fmt.Printf("ema:%.4f,hma:%.4f \n", s.emaSlow.Last(), s.hma.Last())
+	//fmt.Printf("hma:%.4f,rsi:%.4f \n", s.hma.Last(), s.rsi.Last())
+	//fmt.Printf("atr1:%.4f,atr2:%.4f  \n", s.atr.Last(), s.atr2.Last())
 }
 
 func (s *Strategy) smartCancel(ctx context.Context, pricef, atr float64) (int, error) {
@@ -265,20 +373,12 @@ func (s *Strategy) smartCancel(ctx context.Context, pricef, atr float64) (int, e
 		}
 		toCancel := false
 
-		drift := s.drift1m.Array(2)
 		for _, order := range nonTraded {
 			if order.Status != types.OrderStatusNew && order.Status != types.OrderStatusPartiallyFilled {
 				continue
 			}
 			log.Warnf("%v | counter: %d, system: %d", order, s.orderPendingCounter[order.OrderID], s.minutesCounter)
-			if s.minutesCounter-s.orderPendingCounter[order.OrderID] > s.PendingMinutes {
-				if order.Side == types.SideTypeBuy && drift[1] < drift[0] {
-					continue
-				} else if order.Side == types.SideTypeSell && drift[1] > drift[0] {
-					continue
-				}
-				toCancel = true
-			} else if order.Side == types.SideTypeBuy {
+			if order.Side == types.SideTypeBuy {
 				// 75% of the probability
 				if order.Price.Float64()+s.stdevHigh.Last()*2 <= pricef {
 					toCancel = true
@@ -409,107 +509,6 @@ func (s *Strategy) initTickerFunctions(ctx context.Context) {
 
 }
 
-func (s *Strategy) DrawIndicators(time types.Time) *types.Canvas {
-	canvas := types.NewCanvas(s.InstanceID(), s.Interval)
-	Length := s.priceLines.Length()
-	if Length > 300 {
-		Length = 300
-	}
-	log.Infof("draw indicators with %d data", Length)
-	mean := s.priceLines.Mean(Length)
-	highestPrice := s.priceLines.Minus(mean).Abs().Highest(Length)
-	highestDrift := s.drift.Abs().Highest(Length)
-	hi := s.drift.drift.Abs().Highest(Length)
-	h1m := s.drift1m.Abs().Highest(Length * s.Interval.Minutes())
-	ratio := highestPrice / highestDrift
-
-	//canvas.Plot("upband", s.ma.Add(s.stdevHigh), time, Length)
-	canvas.Plot("ma", s.ma, time, Length)
-	//canvas.Plot("downband", s.ma.Minus(s.stdevLow), time, Length)
-	canvas.Plot("pos", types.NumberSeries(s.DriftFilterPos*ratio+mean), time, Length)
-	canvas.Plot("neg", types.NumberSeries(s.DriftFilterNeg*ratio+mean), time, Length)
-	fmt.Printf("%f %f\n", highestPrice, hi)
-	canvas.Plot("ppos", types.NumberSeries(s.DDriftFilterPos*(highestPrice/hi)+mean), time, Length)
-	canvas.Plot("nneg", types.NumberSeries(s.DDriftFilterNeg*(highestPrice/hi)+mean), time, Length)
-
-	canvas.Plot("drift", s.drift.Mul(ratio).Add(mean), time, Length)
-	canvas.Plot("driftOrig", s.drift.drift.Mul(highestPrice/hi).Add(mean), time, Length)
-	canvas.Plot("drift1m", s.drift1m.Mul(highestPrice/h1m).Add(mean), time, Length*s.Interval.Minutes(), types.Interval1m)
-	canvas.Plot("zero", types.NumberSeries(mean), time, Length)
-	canvas.Plot("price", s.priceLines, time, Length)
-	return canvas
-}
-
-func (s *Strategy) DrawPNL(profit types.Series) *types.Canvas {
-	canvas := types.NewCanvas(s.InstanceID())
-	log.Errorf("pnl Highest: %f, Lowest: %f", types.Highest(profit, profit.Length()), types.Lowest(profit, profit.Length()))
-	length := profit.Length()
-	if s.GraphPNLDeductFee {
-		canvas.PlotRaw("pnl % (with Fee Deducted)", profit, length)
-	} else {
-		canvas.PlotRaw("pnl %", profit, length)
-	}
-	canvas.YAxis = chart.YAxis{
-		ValueFormatter: func(v interface{}) string {
-			if vf, isFloat := v.(float64); isFloat {
-				return fmt.Sprintf("%.4f", vf)
-			}
-			return ""
-		},
-	}
-	canvas.PlotRaw("1", types.NumberSeries(1), length)
-	return canvas
-}
-
-func (s *Strategy) DrawCumPNL(cumProfit types.Series) *types.Canvas {
-	canvas := types.NewCanvas(s.InstanceID())
-	canvas.PlotRaw("cummulative pnl", cumProfit, cumProfit.Length())
-	canvas.YAxis = chart.YAxis{
-		ValueFormatter: func(v interface{}) string {
-			if vf, isFloat := v.(float64); isFloat {
-				return fmt.Sprintf("%.4f", vf)
-			}
-			return ""
-		},
-	}
-	return canvas
-}
-
-func (s *Strategy) Draw(time types.Time, profit types.Series, cumProfit types.Series) {
-	canvas := s.DrawIndicators(time)
-	f, err := os.Create(s.CanvasPath)
-	if err != nil {
-		log.WithError(err).Errorf("cannot create on %s", s.CanvasPath)
-		return
-	}
-	defer f.Close()
-	if err := canvas.Render(chart.PNG, f); err != nil {
-		log.WithError(err).Errorf("cannot render in drift")
-	}
-
-	canvas = s.DrawPNL(profit)
-	f, err = os.Create(s.GraphPNLPath)
-	if err != nil {
-		log.WithError(err).Errorf("open pnl")
-		return
-	}
-	defer f.Close()
-	if err := canvas.Render(chart.PNG, f); err != nil {
-		log.WithError(err).Errorf("render pnl")
-	}
-
-	canvas = s.DrawCumPNL(cumProfit)
-	f, err = os.Create(s.GraphCumPNLPath)
-	if err != nil {
-		log.WithError(err).Errorf("open cumpnl")
-		return
-	}
-	defer f.Close()
-	if err := canvas.Render(chart.PNG, f); err != nil {
-		log.WithError(err).Errorf("render cumpnl")
-	}
-}
-
 // Sending new rebalance orders cost too much.
 // Modify the position instead to expect the strategy itself rebalance on Close
 func (s *Strategy) Rebalance(ctx context.Context) {
@@ -574,7 +573,6 @@ func (s *Strategy) CalcAssetValue(price fixedpoint.Value) fixedpoint.Value {
 
 func (s *Strategy) klineHandler1m(ctx context.Context, kline types.KLine) {
 	s.kline1m.Set(&kline)
-	s.drift1m.Update(s.GetSource(&kline).Float64(), kline.Volume.Abs().Float64())
 	if s.Status != types.StrategyStatusRunning {
 		return
 	}
@@ -592,11 +590,6 @@ func (s *Strategy) klineHandler1m(ctx context.Context, kline types.KLine) {
 	}
 	if s.highestPrice > 0 && highf > s.highestPrice {
 		s.highestPrice = highf
-	}
-	drift := s.drift1m.Array(2)
-	if len(drift) < 2 {
-		s.positionLock.Unlock()
-		return
 	}
 
 	numPending := 0
@@ -629,23 +622,8 @@ func (s *Strategy) klineHandler1m(ctx context.Context, kline types.KLine) {
 }
 
 func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
-	var driftPred, atr float64
-	var drift []float64
-
-	s.frameKLine.Set(&kline)
-
 	source := s.GetSource(&kline)
 	sourcef := source.Float64()
-	s.priceLines.Update(sourcef)
-	s.ma.Update(sourcef)
-	s.trendLine.Update(sourcef)
-	s.drift.Update(sourcef, kline.Volume.Abs().Float64())
-
-	s.atr.PushK(kline)
-
-	driftPred = s.drift.Predict(s.PredictOffset)
-	ddriftPred := s.drift.drift.Predict(s.PredictOffset)
-	atr = s.atr.Last()
 	price := s.getLastPrice()
 	pricef := price.Float64()
 	lowf := math.Min(kline.Low.Float64(), pricef)
@@ -654,14 +632,6 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 	s.stdevLow.Update(lowdiff)
 	highdiff := highf - s.ma.Last()
 	s.stdevHigh.Update(highdiff)
-	drift = s.drift.Array(2)
-	if len(drift) < 2 || len(drift) < s.PredictOffset {
-		return
-	}
-	ddrift := s.drift.drift.Array(2)
-	if len(ddrift) < 2 || len(ddrift) < s.PredictOffset {
-		return
-	}
 
 	if s.Status != types.StrategyStatusRunning {
 		return
@@ -669,7 +639,8 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 	stoploss := s.StopLoss.Float64()
 
 	s.positionLock.Lock()
-	fmt.Println("nimama:", s.positionLock)
+	fmt.Println("nimma :", s.positionLock)
+
 	log.Infof("highdiff: %3.2f ma: %.2f, open: %8v, close: %8v, high: %8v, low: %8v, time: %v %v", s.stdevHigh.Last(), s.ma.Last(), kline.Open, kline.Close, kline.High, kline.Low, kline.StartTime, kline.EndTime)
 	if s.lowestPrice > 0 && lowf < s.lowestPrice {
 		s.lowestPrice = lowf
@@ -683,8 +654,8 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 	}
 
 	balances := s.GeneralOrderExecutor.Session().GetAccount().Balances()
-	bbgo.Notify("source: %.4f, price: %.4f, driftPred: %.4f, ddriftPred: %.4f, drift[1]: %.4f, ddrift[1]: %.4f, atr: %.4f, lowf %.4f, highf: %.4f lowest: %.4f highest: %.4f sp %.4f bp %.4f",
-		sourcef, pricef, driftPred, ddriftPred, drift[1], ddrift[1], atr, lowf, highf, s.lowestPrice, s.highestPrice, s.sellPrice, s.buyPrice)
+	bbgo.Notify("source: %.4f, price: %.4f,  atr: %.4f, lowf %.4f, highf: %.4f lowest: %.4f highest: %.4f sp %.4f bp %.4f",
+		sourcef, pricef, s.atr.Last(), lowf, highf, s.lowestPrice, s.highestPrice, s.sellPrice, s.buyPrice)
 	// Notify will parse args to strings and process separately
 	bbgo.Notify("balances: [Total] %v %s [Base] %s(%v %s) [Quote] %s",
 		s.CalcAssetValue(price),
@@ -694,48 +665,92 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 		s.Market.QuoteCurrency,
 		balances[s.Market.QuoteCurrency].String(),
 	)
-	s.DriftFilterPos = s.drift.Filter(func(i int, v float64) bool {
-		return v >= 0
-	}, 30).Mean(30)
-	s.DriftFilterNeg = s.drift.Filter(func(i int, v float64) bool {
-		return v <= 0
-	}, 30).Mean(30)
-	s.DDriftFilterPos = s.drift.drift.Filter(func(i int, v float64) bool {
-		return v >= 0
-	}, 30).Mean(30)
-	s.DDriftFilterNeg = s.drift.drift.Filter(func(i int, v float64) bool {
-		return v <= 0
-	}, 30).Mean(30)
 
-	shortCondition := (drift[1] >= s.DriftFilterNeg || ddrift[1] >= 0) && (driftPred <= s.DDriftFilterNeg || ddriftPred <= 0) || drift[1] < 0 && drift[0] < 0
-	longCondition := (drift[1] <= s.DriftFilterPos || ddrift[1] <= 0) && (driftPred >= s.DDriftFilterPos || ddriftPred >= 0) || drift[1] > 0 && drift[0] > 0
-	if shortCondition && longCondition {
-		if drift[1] > drift[0] {
-			longCondition = false
-		} else {
-			shortCondition = false
-		}
+	adx := s.dmi.ADX.Last()
+	dip := s.dmi.GetDIPlus().Last()
+	dim := s.dmi.GetDIMinus().Last()
+
+	/*1,adx > 20
+	2,价格在ema 之上
+	3,atr 1,10
+	4,量比 rsivol   = ta.rsi(volume, 14)
+	    osc      = ta.hma(rsivol, 10)
+	*/
+
+	volumeBreak := s.hma.Last() > 49 //.Compare(fixedpoint.NewFromFloat(s.emaSlow.Last()))
+
+	atrdiff := s.atr.Last() > s.atr2.Last()
+
+	up := s.macd.Dif.Index(0) > s.macd.Dea.Index(0) && s.macd.Dif.Index(1) < s.macd.Dea.Index(1)
+	down := s.macd.Dif.Index(0) < s.macd.Dea.Index(0) && s.macd.Dif.Index(1) > s.macd.Dea.Index(1)
+	long := up && (adx > 20) && (dim > dip)
+	sig := s.change.Last()
+	if long {
+		sig = BUY
 	}
-	exitShortCondition := s.sellPrice > 0 && !shortCondition && !longCondition && (s.sellPrice*(1.+stoploss) <= highf ||
-		s.trailingCheck(pricef, "short"))
-	exitLongCondition := s.buyPrice > 0 && !longCondition && !shortCondition && (s.buyPrice*(1.-stoploss) >= lowf ||
-		s.trailingCheck(pricef, "long"))
+	short := down && (adx > 20) && (dim > dip) // && atrdiff && volumeBreak //&& !aboveEma //&& !aboveEma  && volumeBreak
+	if short {
+		sig = SELL
+	}
 
-	if exitShortCondition || exitLongCondition {
+	///fmt.Println("front", s.change.Last())
+	s.change.Push(sig)
+	////fmt.Println("back", s.change.Last())
+	changed := s.change.Change()
+	if changed {
+		s.holdingCounter = 0
+	} else {
+		s.holdingCounter++
+	}
+
+	//longCondition := s.rsi.Last() > 50 && s.emaFast.Last() < s.emaSlow.Last() && buleBar && side == types.SideTypeBuy
+	//longCondition := changed && s.change.Last() == BUY
+	longCondition := changed && s.change.Last() == BUY
+
+	//shortCondition := s.rsi.Last() < 50 && s.emaFast.Last() > s.emaSlow.Last() && redBar && side == types.SideTypeSell
+	shortCondition := changed && s.change.Last() == SELL
+
+	closeLong := (changed && s.change.Last() == SELL) // || (s.change.Last() == BUY && s.holdingCounter == holdingMax && !changed) //|| types.CrossUnder(s.dmi.GetDIPlus(), s.dmi.GetDIMinus()).Last()
+
+	closeShort := (changed && s.change.Last() == BUY)
+	exitLongCondition := s.buyPrice > 0 && !changed && (s.buyPrice*(1.-stoploss) >= lowf ||
+		s.trailingCheck(pricef, "long")) || closeLong
+
+	exitShortCondition := s.sellPrice > 0 && !changed && (s.sellPrice*(1.+stoploss) <= highf ||
+		s.trailingCheck(pricef, "short")) || closeShort
+
+	fmt.Printf("time%s,close%.4f,dip:%.4f,dim:%.4f,adx:%.4f\n", kline.EndTime, kline.Close.Float64(), s.dmi.GetDIPlus().Last(), s.dmi.GetDIMinus().Last(), s.dmi.GetADX().Last())
+	//fmt.Printf("ema:%.4f,hma:%.4f \n", s.emaSlow.Last(), s.hma.Last())
+
+	//fmt.Printf("macd %.4f dif：%.4f,dea %.4f   \n", s.macd.Last(), s.macd.Dif.Last(), s.macd.Dea.Last())
+	fmt.Printf(" macd:%.4f  signal:%.4f,adx%.4f,dip%.4f,dim %.4f\n", s.macd.Difs(), s.macd.Deas(), adx, dip, dim)
+
+	//fmt.Printf("hma:%.4f,rsi:%.4f,adx %.4f \n", s.hma.Last(), s.rsi.Last(), s.dmi.ADX.Last())
+	fmt.Printf("atr1:%.4f,atr2:%.4f \n", s.atr.Last(), s.atr2.Last())
+	fmt.Printf("changed:%t,changlast:%s, hoding:%d \n", changed, s.change.Last(), s.holdingCounter)
+	fmt.Printf("s.currentTakeProfitPrice:%.4f,s.currentStopLossPrice:%.4f,  \n", s.currentTakeProfitPrice.Float64(), s.currentStopLossPrice.Float64())
+	//fmt.Printf("stSignal:%d, super last %.4f  \n", stSignal, s.Supertrend.Last())
+	fmt.Printf("atrdiff:%t,volumeBreak:%t,  \n", atrdiff, volumeBreak)
+	fmt.Printf("longCondition:%t,shortCondition:%t, exitLongCondition:%t,exitShortCondition:%t \n", longCondition, shortCondition, exitLongCondition, exitShortCondition)
+	fmt.Println("nimma :", s.positionLock)
+	if exitShortCondition {
 		if err := s.GeneralOrderExecutor.GracefulCancel(ctx); err != nil {
 			log.WithError(err).Errorf("cannot cancel orders")
 			s.positionLock.Unlock()
 			return
 		}
 		_ = s.ClosePosition(ctx, fixedpoint.One)
-	}
+		s.positionLock.Lock()
 
+	}
+	//
 	if longCondition {
 		if err := s.GeneralOrderExecutor.GracefulCancel(ctx); err != nil {
 			log.WithError(err).Errorf("cannot cancel orders")
 			s.positionLock.Unlock()
 			return
 		}
+
 		/*source = source.Sub(fixedpoint.NewFromFloat(s.stdevLow.Last() * s.HighLowVarianceMultiplier))
 		if source.Compare(price) > 0 {
 			source = price
@@ -744,6 +759,7 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 		if source.Compare(price) > 0 {
 			source = price
 		}
+
 		sourcef = source.Float64()
 		log.Infof("source in long %v %v %f", source, price, s.stdevLow.Last())
 
@@ -766,43 +782,42 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 		}
 		return
 	}
-	if shortCondition {
-		if err := s.GeneralOrderExecutor.GracefulCancel(ctx); err != nil {
-			log.WithError(err).Errorf("cannot cancel orders")
-			s.positionLock.Unlock()
-			return
-		}
-		/*source = source.Add(fixedpoint.NewFromFloat(s.stdevHigh.Last() * s.HighLowVarianceMultiplier))
-		if source.Compare(price) < 0 {
-			source = price
-		}*/
-		source = fixedpoint.NewFromFloat(s.ma.Last() + s.stdevHigh.Last()*s.HighLowVarianceMultiplier)
-		if source.Compare(price) < 0 {
-			source = price
-		}
-		sourcef = source.Float64()
-
-		log.Infof("source in short: %v", source)
-
-		s.positionLock.Unlock()
-		opt := s.OpenPositionOptions
-		opt.Short = true
-		opt.Price = source
-		opt.Tags = []string{"long"}
-		createdOrders, err := s.GeneralOrderExecutor.OpenPosition(ctx, opt)
-		if err != nil {
-			if _, ok := err.(types.ZeroAssetError); ok {
-				return
-			}
-			log.WithError(err).Errorf("cannot place buy order")
-			return
-		}
-		log.Infof("orders %v", createdOrders)
-		if createdOrders != nil {
-			s.orderPendingCounter[createdOrders[0].OrderID] = s.minutesCounter
-		}
-		return
-	}
+	//if shortCondition {
+	//	if err := s.GeneralOrderExecutor.GracefulCancel(ctx); err != nil {
+	//		log.WithError(err).Errorf("cannot cancel orders")
+	//		s.positionLock.Unlock()
+	//		return
+	//	}
+	//
+	//	source = fixedpoint.NewFromFloat(s.ma.Last() + s.stdevHigh.Last()*s.HighLowVarianceMultiplier)
+	//	if source.Compare(price) < 0 {
+	//		source = price
+	//	}
+	//	sourcef = source.Float64()
+	//
+	//	log.Infof("source in short: %v", source)
+	//
+	//	s.positionLock.Unlock()
+	//	opt := s.OpenPositionOptions
+	//	opt.Short = true
+	//	opt.Price = source
+	//	opt.Tags = []string{"short"}
+	//	createdOrders, err := s.GeneralOrderExecutor.OpenPosition(ctx, opt)
+	//
+	//	fmt.Println("createOrders:", createdOrders, err)
+	//	if err != nil {
+	//		if _, ok := err.(types.ZeroAssetError); ok {
+	//			return
+	//		}
+	//		log.WithError(err).Errorf("cannot place buy order")
+	//		return
+	//	}
+	//	log.Infof("orders %v", createdOrders)
+	//	if createdOrders != nil {
+	//		s.orderPendingCounter[createdOrders[0].OrderID] = s.minutesCounter
+	//	}
+	//	return
+	//}
 	s.positionLock.Unlock()
 }
 
@@ -937,6 +952,8 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 
 	s.initTickerFunctions(ctx)
 	startTime := s.Environment.StartTime()
+	s.TradeStats.SetIntervalProfitCollector(types.NewIntervalProfitCollector(types.Interval30m, startTime))
+	s.TradeStats.SetIntervalProfitCollector(types.NewIntervalProfitCollector(types.Interval1h, startTime))
 	s.TradeStats.SetIntervalProfitCollector(types.NewIntervalProfitCollector(types.Interval1d, startTime))
 	s.TradeStats.SetIntervalProfitCollector(types.NewIntervalProfitCollector(types.Interval1w, startTime))
 
@@ -1004,7 +1021,9 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 	bbgo.RegisterModifier(s)
 
 	// event trigger order: s.Interval => Interval1m
-	store, ok := session.SerialMarketDataStore(s.Symbol, []types.Interval{s.Interval, types.Interval1m})
+	store, ok := session.MarketDataStore(s.Symbol)
+
+	//store, ok := session.SerialMarketDataStore(s.Symbol, []types.Interval{s.Interval, types.Interval1m})
 	if !ok {
 		panic("cannot get 1m history")
 	}

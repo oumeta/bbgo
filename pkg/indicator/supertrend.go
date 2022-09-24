@@ -122,6 +122,9 @@ func (inc *Supertrend) Update(highPrice, lowPrice, closePrice float64) {
 	logst.Debugf("Update supertrend result: closePrice: %v, uptrendPrice: %v, downtrendPrice: %v, trend: %v,"+
 		" tradeSignal: %v, AverageTrueRange.Last(): %v", inc.closePrice, inc.uptrendPrice, inc.downtrendPrice,
 		inc.trend, inc.tradeSignal, inc.AverageTrueRange.Last())
+	//fmt.Printf("Update supertrend result: closePrice: %v, uptrendPrice: %v, downtrendPrice: %v, trend: %v,"+
+	//	" tradeSignal: %v, AverageTrueRange.Last(): %v", inc.closePrice, inc.uptrendPrice, inc.downtrendPrice,
+	//	inc.trend, inc.tradeSignal, inc.AverageTrueRange.Last())
 }
 
 func (inc *Supertrend) GetSignal() types.Direction {

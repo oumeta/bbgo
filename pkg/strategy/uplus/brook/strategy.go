@@ -1,4 +1,4 @@
-package drift
+package brook
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ import (
 	"github.com/c9s/bbgo/pkg/util"
 )
 
-const ID = "drift"
+const ID = "brook"
 
 var log = logrus.WithField("strategy", ID)
 var Four fixedpoint.Value = fixedpoint.NewFromInt(4)
