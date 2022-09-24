@@ -51,6 +51,17 @@ var rootCmd = &cobra.Command{
 		client := okexapi.NewClient()
 		client.Auth(key, secret, passphrase)
 		exchange := okex.New(key, secret, passphrase)
+
+		markets, err := exchange.QueryMarkets(ctx)
+		if err != nil {
+			return err
+		}
+
+		//
+		market, ok := markets[symbol]
+		if !ok {
+			return fmt.Errorf("market %s is not defined", symbol)
+		}
 		//
 		//instruments, err := client.PublicDataService.NewGetInstrumentsRequest().
 		//	InstrumentType("SPOT").Do(ctx)
