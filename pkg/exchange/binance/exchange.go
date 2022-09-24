@@ -109,7 +109,7 @@ func New(key, secret string) *Exchange {
 		client.BaseURL = BinanceTestBaseURL
 		futuresClient.BaseURL = FutureTestBaseURL
 	}
-	fmt.Println(client.BaseURL)
+
 	client2 := binanceapi.NewClient(client.BaseURL)
 
 	ex := &Exchange{
