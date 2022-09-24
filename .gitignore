@@ -29,6 +29,7 @@
 /build
 /dist
 /bbgow*
+/pmker
 
 /config/bbgo.yaml
 

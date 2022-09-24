@@ -67,11 +67,13 @@ func (t *MarginOrderSideEffectType) UnmarshalJSON(data []byte) error {
 type OrderType string
 
 const (
-	OrderTypeLimit      OrderType = "LIMIT"
-	OrderTypeLimitMaker OrderType = "LIMIT_MAKER"
-	OrderTypeMarket     OrderType = "MARKET"
-	OrderTypeStopLimit  OrderType = "STOP_LIMIT"
-	OrderTypeStopMarket OrderType = "STOP_MARKET"
+	OrderTypeLimit            OrderType = "LIMIT"
+	OrderTypeLimitMaker       OrderType = "LIMIT_MAKER"
+	OrderTypeMarket           OrderType = "MARKET"
+	OrderTypeStopLimit        OrderType = "STOP_LIMIT"
+	OrderTypeStopMarket       OrderType = "STOP_MARKET"
+	OrderTypeTakeProfitLimit  OrderType = "TAKE_PROFIT_LIMIT"
+	OrderTypeTakeProfitMarket OrderType = "TAKE_PROFIT_MARKET"
 )
 
 /*

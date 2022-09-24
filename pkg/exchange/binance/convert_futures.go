@@ -78,22 +78,26 @@ func toGlobalFuturesUserAssets(assets []*futures.AccountAsset) (retAssets types.
 }
 
 func toLocalFuturesOrderType(orderType types.OrderType) (futures.OrderType, error) {
+
 	switch orderType {
-
-	// case types.OrderTypeLimitMaker:
-	// 	return futures.OrderTypeLimitMaker, nil //TODO
-
 	case types.OrderTypeLimit, types.OrderTypeLimitMaker:
 		return futures.OrderTypeLimit, nil
 
-	// case types.OrderTypeStopLimit:
-	// 	return futures.OrderTypeStopLossLimit, nil //TODO
-
-	// case types.OrderTypeStopMarket:
-	// 	return futures.OrderTypeStopLoss, nil //TODO
-
 	case types.OrderTypeMarket:
 		return futures.OrderTypeMarket, nil
+
+	case types.OrderTypeTakeProfitLimit:
+		return futures.OrderTypeTakeProfit, nil
+
+	case types.OrderTypeTakeProfitMarket:
+		return futures.OrderTypeTakeProfitMarket, nil
+
+	case types.OrderTypeStopLimit:
+		return futures.OrderTypeStop, nil
+
+	case types.OrderTypeStopMarket:
+		return futures.OrderTypeStopMarket, nil
+
 	}
 
 	return "", fmt.Errorf("can not convert to local order, order type %s not supported", orderType)
@@ -131,7 +135,7 @@ func toGlobalFuturesOrder(futuresOrder *futures.Order, isIsolated bool) (*types.
 		ExecutedQuantity: fixedpoint.MustNewFromString(futuresOrder.ExecutedQuantity),
 		CreationTime:     types.Time(millisecondTime(futuresOrder.Time)),
 		UpdateTime:       types.Time(millisecondTime(futuresOrder.UpdateTime)),
-		IsFutures: true,
+		IsFutures:        true,
 	}, nil
 }
 
@@ -203,21 +207,29 @@ func toGlobalFuturesSideType(side futures.SideType) types.SideType {
 
 func toGlobalFuturesOrderType(orderType futures.OrderType) types.OrderType {
 	switch orderType {
-	// TODO
-	case futures.OrderTypeLimit: // , futures.OrderTypeLimitMaker, futures.OrderTypeTakeProfitLimit:
+	// FIXME: handle this order type
+	// case futures.OrderTypeTrailingStopMarket:
+
+	case futures.OrderTypeTakeProfit:
+		return types.OrderTypeStopLimit
+
+	case futures.OrderTypeTakeProfitMarket:
+		return types.OrderTypeStopMarket
+
+	case futures.OrderTypeStopMarket:
+		return types.OrderTypeStopMarket
+
+	case futures.OrderTypeStop:
+		return types.OrderTypeStopLimit
+
+	case futures.OrderTypeLimit:
 		return types.OrderTypeLimit
 
 	case futures.OrderTypeMarket:
 		return types.OrderTypeMarket
-	// TODO
-	// case futures.OrderTypeStopLossLimit:
-	// 	return types.OrderTypeStopLimit
-	// TODO
-	// case futures.OrderTypeStopLoss:
-	// 	return types.OrderTypeStopMarket
 
 	default:
-		log.Errorf("unsupported order type: %v", orderType)
+		log.Errorf("unsupported binance futures order type: %s", orderType)
 		return ""
 	}
 }
