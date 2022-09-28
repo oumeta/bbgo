@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/admpub/log"
 	"github.com/adshao/go-binance/v2/futures"
 	"github.com/pkg/errors"
 
@@ -78,22 +79,26 @@ func toGlobalFuturesUserAssets(assets []*futures.AccountAsset) (retAssets types.
 }
 
 func toLocalFuturesOrderType(orderType types.OrderType) (futures.OrderType, error) {
+
 	switch orderType {
-
-	// case types.OrderTypeLimitMaker:
-	// 	return futures.OrderTypeLimitMaker, nil //TODO
-
 	case types.OrderTypeLimit, types.OrderTypeLimitMaker:
 		return futures.OrderTypeLimit, nil
 
-	// case types.OrderTypeStopLimit:
-	// 	return futures.OrderTypeStopLossLimit, nil //TODO
-
-	// case types.OrderTypeStopMarket:
-	// 	return futures.OrderTypeStopLoss, nil //TODO
-
 	case types.OrderTypeMarket:
 		return futures.OrderTypeMarket, nil
+
+	case types.OrderTypeTakeProfitLimit:
+		return futures.OrderTypeTakeProfit, nil
+
+	case types.OrderTypeTakeProfitMarket:
+		return futures.OrderTypeTakeProfitMarket, nil
+
+	case types.OrderTypeStopLimit:
+		return futures.OrderTypeStop, nil
+
+	case types.OrderTypeStopMarket:
+		return futures.OrderTypeStopMarket, nil
+
 	}
 
 	return "", fmt.Errorf("can not convert to local order, order type %s not supported", orderType)
@@ -214,6 +219,9 @@ func toGlobalFuturesOrderType(orderType futures.OrderType) types.OrderType {
 
 	case futures.OrderTypeStopMarket:
 		return types.OrderTypeStopMarket
+
+	case futures.OrderTypeStop:
+		return types.OrderTypeStopLimit
 
 	case futures.OrderTypeLimit:
 		return types.OrderTypeLimit

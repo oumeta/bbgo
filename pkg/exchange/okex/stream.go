@@ -121,6 +121,7 @@ func (s *Stream) handleEvent(event WebSocketEvent) {
 			var subs = []WebsocketSubscription{
 				{Channel: "account"},
 				{Channel: "orders", InstrumentType: string(okexapi.InstrumentTypeSpot)},
+				{Channel: "orders", InstrumentType: string(okexapi.InstrumentTypeSwap)},
 			}
 
 			log.Infof("subscribing private channels: %+v", subs)
@@ -196,6 +197,14 @@ func (s *Stream) createEndpoint(ctx context.Context) (string, error) {
 	} else {
 		url = okexapi.PrivateWebSocketURL
 	}
+	if okexapi.PaperTrade() {
+		if s.PublicOnly {
+			url = okexapi.PublicWebSocketURLTest
+		} else {
+			url = okexapi.PrivateWebSocketURLTest
+		}
+	}
+
 	return url, nil
 }
 
