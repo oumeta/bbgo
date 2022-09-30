@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/admpub/log"
 	"github.com/adshao/go-binance/v2/futures"
 	"github.com/pkg/errors"
 

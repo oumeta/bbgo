@@ -2,6 +2,7 @@ package trendtrader
 
 import (
 	"context"
+	"fmt"
 	"github.com/c9s/bbgo/pkg/bbgo"
 	"github.com/c9s/bbgo/pkg/fixedpoint"
 	"github.com/c9s/bbgo/pkg/indicator"
@@ -91,6 +92,8 @@ func (s *TrendLine) Bind(session *bbgo.ExchangeSession, orderExecutor *bbgo.Gene
 
 			supportSlope = (supportSlope1 + supportSlope2) / 2.
 		}
+
+		fmt.Printf("k:%s,hight:%.4f,res:%.4f,low:%.4f,sup:%.4f \n", kline.StartTime.String(), s.pivotHigh.Last(), resistancePrices.Last(), s.pivotLow.Last(), supportPrices.Last())
 
 		if converge(resistanceSlope, supportSlope) {
 			// y = mx+b

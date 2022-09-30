@@ -86,7 +86,7 @@ var optimizeCmd = &cobra.Command{
 		defer cancel()
 		_ = ctx
 
-		configDir, err := os.MkdirTemp("", "bbgo-config-*")
+		configDir, err := os.MkdirTemp("./", "bbgo-config-*")
 		if err != nil {
 			return err
 		}
@@ -98,6 +98,7 @@ var optimizeCmd = &cobra.Command{
 			ConfigDir: configDir,
 			OutputDir: outputDirectory,
 		}
+		fmt.Println("nioma ", configDir, outputDirectory, optConfig.Executor.LocalExecutorConfig)
 
 		optz := &optimizer.GridOptimizer{
 			Config: optConfig,
@@ -106,8 +107,9 @@ var optimizeCmd = &cobra.Command{
 		if err := executor.Prepare(configJson); err != nil {
 			return err
 		}
-
 		metrics, err := optz.Run(executor, configJson)
+		fmt.Println("fuck", err)
+
 		fmt.Println("metrics", metrics, len(metrics))
 		if err != nil {
 			return err

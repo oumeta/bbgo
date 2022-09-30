@@ -14,12 +14,12 @@ matrix:
   path: '/exchangeStrategies/0/bollmaker/interval'
   values: [ "1m", "5m", "15m", "30m" ]
 
-- type: range
-  path: '/exchangeStrategies/0/bollmaker/amount'
-  label: amount
-  min: 20.0
-  max: 100.0
-  step: 20.0
+#- type: range
+#  path: '/exchangeStrategies/0/bollmaker/amount'
+#  label: amount
+#  min: 20.0
+#  max: 100.0
+#  step: 20.0
 
 - type: range
   label: spread

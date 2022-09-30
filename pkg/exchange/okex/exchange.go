@@ -113,6 +113,7 @@ func (e *Exchange) QueryMarkets(ctx context.Context) (types.MarketMap, error) {
 			market.QuoteCurrency = instrument.SettleCurrency
 			market.BaseCurrency = instrument.ContractValueCurrency
 		}
+		fmt.Println(symbol)
 
 		markets[symbol] = market
 	}

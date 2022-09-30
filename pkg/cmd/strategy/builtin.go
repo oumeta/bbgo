@@ -33,6 +33,7 @@ import (
 	_ "github.com/c9s/bbgo/pkg/strategy/techsignal"
 	_ "github.com/c9s/bbgo/pkg/strategy/trendtrader"
 	_ "github.com/c9s/bbgo/pkg/strategy/uplus/brook"
+	_ "github.com/c9s/bbgo/pkg/strategy/uplus/doublecci"
 	_ "github.com/c9s/bbgo/pkg/strategy/uplus/genvdmi"
 	_ "github.com/c9s/bbgo/pkg/strategy/uplus/newdmi"
 	_ "github.com/c9s/bbgo/pkg/strategy/wall"
