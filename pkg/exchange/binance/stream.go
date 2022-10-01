@@ -253,6 +253,7 @@ func (s *Stream) handleAccountConfigUpdateEvent(e *AccountConfigUpdateEvent) {
 }
 
 func (s *Stream) handleOrderTradeUpdateEvent(e *OrderTradeUpdateEvent) {
+
 	switch e.OrderTrade.CurrentExecutionType {
 
 	case "NEW", "CANCELED", "EXPIRED":
@@ -281,6 +282,7 @@ func (s *Stream) handleOrderTradeUpdateEvent(e *OrderTradeUpdateEvent) {
 
 		// Update Order with FILLED event
 		if order.Status == types.OrderStatusFilled {
+
 			s.EmitOrderUpdate(*order)
 		}
 

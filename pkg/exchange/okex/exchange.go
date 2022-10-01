@@ -284,10 +284,10 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 
 			fmt.Println("close ", order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
 			orderReq.ReduceOnly(order.ReduceOnly)
-			orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+			//orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat()).Round(0, fixedpoint.Down).String())
 
 		} else {
-			orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
+			//orderReq.Quantity(order.Quantity.Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down).String())
 
 		}
 

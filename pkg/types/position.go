@@ -416,6 +416,7 @@ func (p *Position) String() string {
 
 func (p *Position) BindStream(stream Stream) {
 	stream.OnTradeUpdate(func(trade Trade) {
+
 		if p.Symbol == trade.Symbol {
 			p.AddTrade(trade)
 		}
@@ -435,6 +436,7 @@ func (p *Position) AddTrades(trades []Trade) (fixedpoint.Value, fixedpoint.Value
 }
 
 func (p *Position) AddTrade(td Trade) (profit fixedpoint.Value, netProfit fixedpoint.Value, madeProfit bool) {
+
 	price := td.Price
 	quantity := td.Quantity
 	quoteQuantity := td.QuoteQuantity
@@ -523,12 +525,14 @@ func (p *Position) AddTrade(td Trade) (profit fixedpoint.Value, netProfit fixedp
 
 		// here the case is: base == 0 or base > 0
 		divisor := p.Base.Add(quantity)
+
 		p.ApproximateAverageCost = p.ApproximateAverageCost.Mul(p.Base).
 			Add(quoteQuantity).
 			Add(feeInQuote).
 			Div(divisor)
 		p.AverageCost = p.AverageCost.Mul(p.Base).Add(quoteQuantity).Div(divisor)
 		p.Base = p.Base.Add(quantity)
+
 		p.Quote = p.Quote.Sub(quoteQuantity)
 		return fixedpoint.Zero, fixedpoint.Zero, false
 
@@ -573,6 +577,8 @@ func (p *Position) AddTrade(td Trade) (profit fixedpoint.Value, netProfit fixedp
 			Add(quoteQuantity).
 			Div(divisor)
 		p.Base = p.Base.Sub(quantity)
+		fmt.Println("fuck4", p.Base.String())
+
 		p.Quote = p.Quote.Add(quoteQuantity)
 
 		return fixedpoint.Zero, fixedpoint.Zero, false

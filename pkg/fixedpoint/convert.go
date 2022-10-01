@@ -212,6 +212,7 @@ func (v Value) Sub(v2 Value) Value {
 }
 
 func (v Value) Add(v2 Value) Value {
+	//fmt.Println("ri bi ", v2.Float64())
 	return Value(int64(v) + int64(v2))
 }
 

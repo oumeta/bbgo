@@ -74,6 +74,7 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 	// assign parameter of instrumentID
 	params["instId"] = instrumentID
 
+
 	// check tradeMode field -> json key tdMode
 	tradeMode := p.tradeMode
 
@@ -145,6 +146,7 @@ func (p *PlaceOrderRequest) GetParameters() (map[string]interface{}, error) {
 		// assign parameter of price
 		params["px"] = price
 	}
+	params["instType"] = "SWAP"
 	fmt.Println(params)
 	if p.reduceOnly == true {
 		params["reduceOnly"] = true

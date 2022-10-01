@@ -182,8 +182,10 @@ func (session *ExchangeSession) Init(ctx context.Context, environ *Environment) 
 	var markets types.MarketMap
 	var err error
 	if util.SetEnvVarBool("DISABLE_MARKETS_CACHE", &disableMarketsCache); disableMarketsCache {
+		fmt.Println(11111)
 		markets, err = session.Exchange.QueryMarkets(ctx)
 	} else {
+		fmt.Println(22222)
 		markets, err = cache.LoadExchangeMarketsWithCache(ctx, session.Exchange)
 		if err != nil {
 			return err
