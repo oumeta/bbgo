@@ -1,6 +1,7 @@
 package indi
 
 import (
+	"github.com/c9s/bbgo/pkg/indicator"
 	"github.com/shopspring/decimal"
 	"math"
 
@@ -113,6 +114,6 @@ func (inc *JMA) handleKLineWindowUpdate(interval types.Interval, window types.KL
 	inc.CalculateAndUpdate(window)
 }
 
-func (inc *JMA) Bind(updater KLineWindowUpdater) {
+func (inc *JMA) Bind(updater indicator.KLineWindowUpdater) {
 	updater.OnKLineWindowUpdate(inc.handleKLineWindowUpdate)
 }

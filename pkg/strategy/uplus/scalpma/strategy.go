@@ -194,8 +194,9 @@ func (s *Strategy) LimitStopPosition(ctx context.Context, tag string) error {
 func (s *Strategy) ClosePosition(ctx context.Context, percentage fixedpoint.Value) error {
 	//err := s.GeneralOrderExecutor.ClosePosition(ctx, fixedpoint.One)
 	//return err
-	print(s.buyTime.Add(5*time.Minute), time.Now())
+	fmt.Println(s.buyTime.Add(5*time.Minute), time.Now())
 	if !time.Now().After(s.buyTime.Add(5 * time.Minute)) {
+		fmt.Println("1分钟内不能平仓")
 		return nil
 	}
 
