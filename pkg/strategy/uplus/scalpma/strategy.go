@@ -687,7 +687,10 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 	exitLongCondition := s.buyPrice > 0 && !longCondition && (lowf < s.priceLines.Index(0) || highf > s.priceLines.Index(1))
 
 	//exitShortCondition := s.sellPrice > 0 && !shortCondition && s.sellPrice*(1.+stoploss) <= highf || s.sellPrice+atr*6 <= highf || s.trailingCheck(highf, "short")
-
+	if s.Position.IsOpened(kline.Close) {
+		bbgo.Notify("%s position is already opened, skip", s.Symbol)
+		return
+	}
 	if exitLongCondition {
 		if err := s.GeneralOrderExecutor.GracefulCancel(ctx); err != nil {
 			log.WithError(err).Errorf("cannot cancel orders")
