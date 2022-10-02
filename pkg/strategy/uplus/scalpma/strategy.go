@@ -85,7 +85,9 @@ type Strategy struct {
 	minutesCounter      int
 
 	// for position
-	buyPrice     float64 `persistence:"buy_price"`
+	buyPrice float64 `persistence:"buy_price"`
+
+	buyTime      time.Time
 	sellPrice    float64 `persistence:"sell_price"`
 	highestPrice float64 `persistence:"highest_price"`
 	lowestPrice  float64 `persistence:"lowest_price"`
@@ -192,6 +194,11 @@ func (s *Strategy) LimitStopPosition(ctx context.Context, tag string) error {
 func (s *Strategy) ClosePosition(ctx context.Context, percentage fixedpoint.Value) error {
 	//err := s.GeneralOrderExecutor.ClosePosition(ctx, fixedpoint.One)
 	//return err
+	print(s.buyTime.Add(5*time.Minute), time.Now())
+	if !time.Now().After(s.buyTime.Add(5 * time.Minute)) {
+		return nil
+	}
+
 	order := s.Position.NewMarketCloseOrder(percentage)
 	if order == nil {
 		return nil
@@ -465,6 +472,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 			s.lowestPrice = 0
 		} else if s.Position.IsLong() {
 			s.buyPrice = price
+			s.buyTime = time.Now()
 			s.sellPrice = 0
 			s.highestPrice = s.buyPrice
 			s.lowestPrice = 0
@@ -680,7 +688,7 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 	)
 	//bull := kline.Close.Compare(kline.Open) > 0
 
-	longCondition := kline.Low.Float64() < bott2 && kline.Close.Compare(kline.Low) > 0
+	longCondition := kline.Low.Float64() < bott2 && kline.Low.Float64() > bott3 && kline.Close.Compare(kline.Low) > 0
 
 	//shortCondition := !changed && s.change.Last() == "1" && s.cciFast.CrossUnder(s.cciSlow).Last()
 
