@@ -10,13 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/c9s/bbgo/pkg/bbgo"
 	"github.com/c9s/bbgo/pkg/datatype/floats"
 	"github.com/c9s/bbgo/pkg/fixedpoint"
 	"github.com/c9s/bbgo/pkg/indicator"
 	"github.com/c9s/bbgo/pkg/types"
 	"github.com/c9s/bbgo/pkg/util"
-	"github.com/sirupsen/logrus"
 )
 
 const ID = "elliottwave"
@@ -309,7 +310,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 	s.GeneralOrderExecutor.BindProfitStats(s.ProfitStats)
 	s.GeneralOrderExecutor.BindTradeStats(s.TradeStats)
 	s.GeneralOrderExecutor.TradeCollector().OnPositionUpdate(func(p *types.Position) {
-		bbgo.Sync(s)
+		bbgo.Sync(ctx, s)
 	})
 	s.GeneralOrderExecutor.Bind()
 
@@ -379,7 +380,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		}
 	})
 
-	bbgo.OnShutdown(func(ctx context.Context, wg *sync.WaitGroup) {
+	bbgo.OnShutdown(ctx, func(ctx context.Context, wg *sync.WaitGroup) {
 		var buffer bytes.Buffer
 		for _, daypnl := range s.TradeStats.IntervalProfits[types.Interval1d].GetNonProfitableIntervals() {
 			fmt.Fprintf(&buffer, "%s\n", daypnl)

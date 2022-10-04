@@ -6,10 +6,11 @@ import (
 	"os"
 	"sync"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/c9s/bbgo/pkg/bbgo"
 	"github.com/c9s/bbgo/pkg/fixedpoint"
 	"github.com/c9s/bbgo/pkg/types"
-	"github.com/sirupsen/logrus"
 )
 
 const ID = "audacitymaker"
@@ -99,7 +100,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		// Cancel active orders
 		_ = s.orderExecutor.GracefulCancel(ctx)
 		// Close 100% position
-		//_ = s.ClosePosition(ctx, fixedpoint.One)
+		// _ = s.ClosePosition(ctx, fixedpoint.One)
 	})
 
 	// initial required information
@@ -110,7 +111,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 	s.orderExecutor.BindProfitStats(s.ProfitStats)
 	s.orderExecutor.BindTradeStats(s.TradeStats)
 	s.orderExecutor.TradeCollector().OnPositionUpdate(func(position *types.Position) {
-		bbgo.Sync(s)
+		bbgo.Sync(ctx, s)
 	})
 	s.orderExecutor.Bind()
 	s.activeOrders = bbgo.NewActiveOrderBook(s.Symbol)
@@ -123,7 +124,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		s.OrderFlow.Bind(session, s.orderExecutor)
 	}
 
-	bbgo.OnShutdown(func(ctx context.Context, wg *sync.WaitGroup) {
+	bbgo.OnShutdown(ctx, func(ctx context.Context, wg *sync.WaitGroup) {
 		defer wg.Done()
 
 		_, _ = fmt.Fprintln(os.Stderr, s.TradeStats.String())

@@ -544,14 +544,14 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 
 	// Sync position to redis on trade
 	s.orderExecutor.TradeCollector().OnPositionUpdate(func(position *types.Position) {
-		bbgo.Sync(s)
+		bbgo.Sync(ctx, s)
 	})
 
 	// StrategyController
 	s.Status = types.StrategyStatusRunning
 	s.OnSuspend(func() {
 		_ = s.orderExecutor.GracefulCancel(ctx)
-		bbgo.Sync(s)
+		bbgo.Sync(ctx, s)
 	})
 	s.OnEmergencyStop(func() {
 		_ = s.orderExecutor.GracefulCancel(ctx)
@@ -643,7 +643,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 	}))
 
 	// Graceful shutdown
-	bbgo.OnShutdown(func(ctx context.Context, wg *sync.WaitGroup) {
+	bbgo.OnShutdown(ctx, func(ctx context.Context, wg *sync.WaitGroup) {
 		defer wg.Done()
 
 		// Output accumulated profit report

@@ -30,8 +30,6 @@ func init() {
 }
 
 type Strategy struct {
-	*bbgo.Persistence
-
 	Environment          *bbgo.Environment
 	StandardIndicatorSet *bbgo.StandardIndicatorSet
 	Market               types.Market
@@ -376,7 +374,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		}
 	}()
 
-	bbgo.OnShutdown(func(ctx context.Context, wg *sync.WaitGroup) {
+	bbgo.OnShutdown(ctx, func(ctx context.Context, wg *sync.WaitGroup) {
 		defer wg.Done()
 		close(s.stopC)
 

@@ -279,7 +279,7 @@ func (s *Strategy) checkBalance(ctx context.Context, sessions map[string]*bbgo.E
 
 		s.State.DailyNumberOfTransfers += 1
 		s.State.DailyAmountOfTransfers = s.State.DailyAmountOfTransfers.Add(requiredAmount)
-		bbgo.Sync(s)
+		bbgo.Sync(ctx, s)
 	}
 }
 
@@ -341,7 +341,7 @@ func (s *Strategy) CrossRun(ctx context.Context, _ bbgo.OrderExecutionRouter, se
 		s.State = s.newDefaultState()
 	}
 
-	bbgo.OnShutdown(func(ctx context.Context, wg *sync.WaitGroup) {
+	bbgo.OnShutdown(ctx, func(ctx context.Context, wg *sync.WaitGroup) {
 		defer wg.Done()
 	})
 
