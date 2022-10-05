@@ -1,4 +1,4 @@
-package newdmi
+package scalpma
 
 import "github.com/c9s/bbgo/pkg/fixedpoint"
 

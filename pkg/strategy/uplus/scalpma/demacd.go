@@ -1,4 +1,4 @@
-package doublecci
+package scalpma
 
 import (
 	"github.com/c9s/bbgo/pkg/indicator"

@@ -1,4 +1,4 @@
-package doublecci
+package scalpma
 
 import (
 	"bytes"
