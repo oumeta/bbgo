@@ -1,4 +1,4 @@
-package irr
+package harmonic
 
 import (
 	"context"
@@ -9,17 +9,11 @@ import (
 	"github.com/c9s/bbgo/pkg/fixedpoint"
 	"github.com/c9s/bbgo/pkg/indicator"
 	"github.com/c9s/bbgo/pkg/types"
-	"os"
-	"sync"
 
 	"github.com/sirupsen/logrus"
 )
 
-const ID = "irr"
-
-var one = fixedpoint.One
-var zero = fixedpoint.Zero
-var Fee = 0.0008 // taker fee % * 2, for upper bound
+const ID = "harmonic"
 
 var log = logrus.WithField("strategy", ID)
 
@@ -33,13 +27,12 @@ type Strategy struct {
 	Market      types.Market
 
 	types.IntervalWindow
+	//bbgo.OpenPositionOptions
 
 	// persistence fields
 	Position    *types.Position    `persistence:"position"`
 	ProfitStats *types.ProfitStats `persistence:"profit_stats"`
 	TradeStats  *types.TradeStats  `persistence:"trade_stats"`
-
-	activeOrders *bbgo.ActiveOrderBook
 
 	ExitMethods bbgo.ExitMethodSet `json:"exits"`
 
@@ -47,10 +40,11 @@ type Strategy struct {
 	orderExecutor *bbgo.GeneralOrderExecutor
 
 	bbgo.QuantityOrAmount
-	nrr *NRR
 
 	// StrategyController
 	bbgo.StrategyController
+
+	shark *SHARK
 
 	AccountValueCalculator *bbgo.AccountValueCalculator
 
@@ -211,6 +205,11 @@ func (s *Strategy) InstanceID() string {
 	return fmt.Sprintf("%s:%s", ID, s.Symbol)
 }
 
+func (s *Strategy) CalcAssetValue(price fixedpoint.Value) fixedpoint.Value {
+	balances := s.session.GetAccount().Balances()
+	return balances[s.Market.BaseCurrency].Total().Mul(price).Add(balances[s.Market.QuoteCurrency].Total())
+}
+
 func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, session *bbgo.ExchangeSession) error {
 	var instanceID = s.InstanceID()
 
@@ -238,10 +237,9 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		// Cancel active orders
 		_ = s.orderExecutor.GracefulCancel(ctx)
 		// Close 100% position
-		// _ = s.ClosePosition(ctx, fixedpoint.One)
+		//_ = s.ClosePosition(ctx, fixedpoint.One)
 	})
 
-	// initial required information
 	s.session = session
 
 	// Set fee rate
@@ -323,78 +321,77 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		bbgo.Sync(ctx, s)
 	})
 	s.orderExecutor.Bind()
-	s.activeOrders = bbgo.NewActiveOrderBook(s.Symbol)
 
 	for _, method := range s.ExitMethods {
 		method.Bind(session, s.orderExecutor)
 	}
 
 	kLineStore, _ := s.session.MarketDataStore(s.Symbol)
-	s.nrr = &NRR{IntervalWindow: types.IntervalWindow{Window: 2, Interval: s.Interval}, RankingWindow: s.Window}
-	s.nrr.BindK(s.session.MarketDataStream, s.Symbol, s.Interval)
-	if klines, ok := kLineStore.KLinesOfInterval(s.nrr.Interval); ok {
-		s.nrr.LoadK((*klines)[0:])
+	s.shark = &SHARK{IntervalWindow: types.IntervalWindow{Window: s.Window, Interval: s.Interval}}
+	s.shark.BindK(s.session.MarketDataStream, s.Symbol, s.shark.Interval)
+	if klines, ok := kLineStore.KLinesOfInterval(s.shark.Interval); ok {
+		s.shark.LoadK((*klines)[0:])
 	}
-
-	// startTime := s.Environment.StartTime()
-	// s.TradeStats.SetIntervalProfitCollector(types.NewIntervalProfitCollector(types.Interval1h, startTime))
-
 	s.session.MarketDataStream.OnKLineClosed(types.KLineWith(s.Symbol, s.Interval, func(kline types.KLine) {
 
-		// ts_rank(): transformed to [0~1] which divided equally
-		// queued first signal as its initial process
-		// important: delayed signal in order to submit order at current kline close (a.k.a. next open while in production)
-		// instead of right in current kline open
+		log.Infof("Shark Score: %f, Current Price: %f", s.shark.Last(), kline.Close.Float64())
 
-		// alpha-weighted assets (inventory and capital)
-		targetBase := s.QuantityOrAmount.CalculateQuantity(kline.Close).Mul(fixedpoint.NewFromFloat(s.nrr.RankedValues.Index(1)))
-		diffQty := targetBase.Sub(s.Position.Base)
+		//previousRegime := s.shark.Values.Tail(10).Mean()
+		//zeroThreshold := 5.
 
-		log.Infof("decision alpah: %f, ranked negative return: %f, current position: %f, target position diff: %f", s.nrr.RankedValues.Index(1), s.nrr.RankedValues.Last(), s.Position.Base.Float64(), diffQty.Float64())
-
-		// use kline direction to prevent reversing position too soon
-		if diffQty.Sign() > 0 { // && kline.Direction() >= 0
-			_, _ = s.orderExecutor.SubmitOrders(ctx, types.SubmitOrder{
+		if s.shark.Rank(s.Window).Last()/float64(s.Window) > 0.99 { // && ((previousRegime < zeroThreshold && previousRegime > -zeroThreshold) || s.shark.Index(1) < 0)
+			if s.Position.IsShort() {
+				_ = s.orderExecutor.GracefulCancel(ctx)
+				s.orderExecutor.ClosePosition(ctx, fixedpoint.One, "close short position")
+			}
+			_, err := s.orderExecutor.SubmitOrders(ctx, types.SubmitOrder{
 				Symbol:   s.Symbol,
 				Side:     types.SideTypeBuy,
-				Quantity: diffQty.Abs(),
+				Quantity: s.Quantity,
 				Type:     types.OrderTypeMarket,
-				Tag:      "irr buy more",
+				Tag:      "shark long: buy in",
 			})
-		} else if diffQty.Sign() < 0 { // && kline.Direction() <= 0
-			_, _ = s.orderExecutor.SubmitOrders(ctx, types.SubmitOrder{
+			if err == nil {
+				_, err = s.orderExecutor.SubmitOrders(ctx, types.SubmitOrder{
+					Symbol:   s.Symbol,
+					Side:     types.SideTypeSell,
+					Quantity: s.Quantity,
+					Price:    fixedpoint.NewFromFloat(s.shark.Highs.Tail(100).Max()),
+					Type:     types.OrderTypeLimit,
+					Tag:      "shark long: sell back",
+				})
+			}
+			if err != nil {
+				log.Errorln(err)
+			}
+
+		} else if s.shark.Rank(s.Window).Last()/float64(s.Window) < 0.01 { // && ((previousRegime < zeroThreshold && previousRegime > -zeroThreshold) || s.shark.Index(1) > 0)
+			if s.Position.IsLong() {
+				_ = s.orderExecutor.GracefulCancel(ctx)
+				s.orderExecutor.ClosePosition(ctx, fixedpoint.One, "close long position")
+			}
+			_, err := s.orderExecutor.SubmitOrders(ctx, types.SubmitOrder{
 				Symbol:   s.Symbol,
 				Side:     types.SideTypeSell,
-				Quantity: diffQty.Abs(),
+				Quantity: s.Quantity,
 				Type:     types.OrderTypeMarket,
-				Tag:      "irr sell more",
+				Tag:      "shark short: sell in",
 			})
-		}
-
-	}))
-
-	bbgo.OnShutdown(ctx, func(ctx context.Context, wg *sync.WaitGroup) {
-		defer wg.Done()
-
-		// Output accumulated profit report
-		if bbgo.IsBackTesting {
-			defer s.AccumulatedProfitReport.Output(s.Symbol)
-
-			if s.DrawGraph {
-				if err := s.Draw(&profitSlice, &cumProfitSlice); err != nil {
-					log.WithError(err).Errorf("cannot draw graph")
-				}
+			if err == nil {
+				_, err = s.orderExecutor.SubmitOrders(ctx, types.SubmitOrder{
+					Symbol:   s.Symbol,
+					Side:     types.SideTypeBuy,
+					Quantity: s.Quantity,
+					Price:    fixedpoint.NewFromFloat(s.shark.Lows.Tail(100).Min()),
+					Type:     types.OrderTypeLimit,
+					Tag:      "shark short: buy back",
+				})
+			}
+			if err != nil {
+				log.Errorln(err)
 			}
 		}
-		
-		_, _ = fmt.Fprintln(os.Stderr, s.TradeStats.String())
-		_ = s.orderExecutor.GracefulCancel(ctx)
-	})
+	}))
 
 	return nil
-}
-
-func (s *Strategy) CalcAssetValue(price fixedpoint.Value) fixedpoint.Value {
-	balances := s.session.GetAccount().Balances()
-	return balances[s.Market.BaseCurrency].Total().Mul(price).Add(balances[s.Market.QuoteCurrency].Total())
 }
