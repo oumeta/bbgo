@@ -60,6 +60,7 @@ func (inc *JMA) Update(value float64) {
 
 		inc.Values.Update(value)
 		inc.input.Push(value)
+		return
 
 	}
 	inc.input.Push(value)

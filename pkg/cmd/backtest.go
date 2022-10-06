@@ -294,7 +294,7 @@ var BacktestCmd = &cobra.Command{
 			return err
 		}
 
-		backTestIntervals := []types.Interval{types.Interval1h, types.Interval1d}
+		backTestIntervals := []types.Interval{types.Interval5m, types.Interval30m, types.Interval1h, types.Interval1d}
 		exchangeSources, err := toExchangeSources(environ.Sessions(), startTime, endTime, backTestIntervals...)
 		if err != nil {
 			return err

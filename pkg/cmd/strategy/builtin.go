@@ -37,7 +37,7 @@ import (
 	//_ "github.com/c9s/bbgo/pkg/strategy/uplus/doublecci"
 	//_ "github.com/c9s/bbgo/pkg/strategy/uplus/genvdmi"
 	//_ "github.com/c9s/bbgo/pkg/strategy/uplus/lingo"
-	//_ "github.com/c9s/bbgo/pkg/strategy/uplus/newdmi"
+	_ "github.com/c9s/bbgo/pkg/strategy/uplus/dmima"
 	_ "github.com/c9s/bbgo/pkg/strategy/uplus/scalpma"
 	_ "github.com/c9s/bbgo/pkg/strategy/wall"
 	_ "github.com/c9s/bbgo/pkg/strategy/xbalance"

@@ -28,6 +28,7 @@ func (inc *HULL) Update(value float64) {
 		inc.ma2 = &EWMA{IntervalWindow: inc.IntervalWindow}
 		inc.result = &EWMA{IntervalWindow: types.IntervalWindow{Interval: inc.Interval, Window: int(math.Sqrt(float64(inc.Window)))}}
 	}
+
 	inc.ma1.Update(value)
 	inc.ma2.Update(value)
 	inc.result.Update(2*inc.ma1.Last() - inc.ma2.Last())
