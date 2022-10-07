@@ -30,6 +30,7 @@
 /dist
 /bbgow*
 /amker
+/output
 
 /config/bbgo.yaml
 
