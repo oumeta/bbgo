@@ -206,7 +206,6 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 		createdOrder, err := e.SubmitAlgoOrder(ctx, order)
 		return createdOrder, err
 	}
-	fmt.Println("fuck2")
 
 	orderReq := e.client.TradeService.NewPlaceOrderRequest()
 	param := order.Params
@@ -221,7 +220,7 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 		orderReq.Quantity(order.Quantity.FormatString(8))
 	}
 
-	fmt.Println("order.Market.FormatPrice(order.Price)", order.Market.FormatPrice(order.Price))
+	//fmt.Println("order.Market.FormatPrice(order.Price)", order.Market.FormatPrice(order.Price))
 	// set price field for limit orders
 	switch order.Type {
 	case types.OrderTypeStopLimit, types.OrderTypeLimit, types.OrderTypeLimitMaker:
@@ -298,7 +297,7 @@ func (e *Exchange) SubmitOrder(ctx context.Context, order types.SubmitOrder) (*t
 	//
 
 	//orderReq("cash")
-	fmt.Println(3333)
+	//fmt.Println(3333)
 	orderHead, err := orderReq.Do(ctx)
 	if err != nil {
 		return nil, err

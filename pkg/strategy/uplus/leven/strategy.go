@@ -1,4 +1,4 @@
-package dmima
+package leven
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const ID = "dmima"
+const ID = "leven"
 
 var log = logrus.WithField("strategy", ID)
 
@@ -400,7 +400,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		return nil
 	}
 	s.initTickerFunctions()
-	s.PostionCheck(ctx)
+	//s.PostionCheck(ctx)
 	s.session.MarketDataStream.OnKLineClosed(types.KLineWith(s.Symbol, s.Interval, func(kline types.KLine) {
 		s.AddKline(kline)
 
@@ -462,14 +462,14 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 
 			if exitCondition {
 				fmt.Println("平空")
-				_ = s.ClosePosition(ctx, fixedpoint.One)
+				_ = s.ClosePosition(ctx, fixedpoint.One, "close long position")
 			}
 		}
 		if shortCondition { // && ((previousRegime < zeroThreshold && previousRegime > -zeroThreshold) || s.grid.Index(1) > 0)
 			fmt.Println("开空")
 			if s.Position.IsLong() {
 				_ = s.orderExecutor.GracefulCancel(ctx)
-				s.orderExecutor.ClosePosition(ctx, fixedpoint.One, "close long position")
+				s.ClosePosition(ctx, fixedpoint.One, "close long position")
 			}
 			_, err := s.orderExecutor.SubmitOrders(ctx, types.SubmitOrder{
 				Symbol:   s.Symbol,

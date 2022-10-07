@@ -97,6 +97,7 @@ type Market struct {
 }
 
 func (m Market) IsDustQuantity(quantity, price fixedpoint.Value) bool {
+	//fmt.Println("m.MinQuantity", m.MinQuantity)
 	return quantity.Compare(m.MinQuantity) <= 0 || quantity.Mul(price).Compare(m.MinNotional) <= 0
 }
 

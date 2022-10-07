@@ -577,7 +577,7 @@ func (p *Position) AddTrade(td Trade) (profit fixedpoint.Value, netProfit fixedp
 			Add(quoteQuantity).
 			Div(divisor)
 		p.Base = p.Base.Sub(quantity)
-		fmt.Println("fuck4", p.Base.String())
+		//fmt.Println("fuck4", p.Base.String())
 
 		p.Quote = p.Quote.Add(quoteQuantity)
 
