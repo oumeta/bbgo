@@ -5,6 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"os"
+	"sync"
+	"time"
+
 	"github.com/c9s/bbgo/pkg/bbgo"
 	"github.com/c9s/bbgo/pkg/datatype/floats"
 	"github.com/c9s/bbgo/pkg/fixedpoint"
@@ -13,10 +18,6 @@ import (
 	"github.com/c9s/bbgo/pkg/types"
 	"github.com/c9s/bbgo/pkg/util"
 	"github.com/sirupsen/logrus"
-	"math"
-	"os"
-	"sync"
-	"time"
 )
 
 const ID = "scalpma"
@@ -61,6 +62,8 @@ type Strategy struct {
 	JmaPhase  float64          `json:"jmaPhase"`
 	JmaPower  float64          `json:"jmaPower"`
 	Sigma     float64          `json:"sigma"`
+	AtrSigma  float64          `json:"atrSigma"`
+	Side      string           `json:"side"`
 
 	PendingMinutes int `json:"pendingMinutes" modifiable:"true"`
 
@@ -107,6 +110,10 @@ type Strategy struct {
 	lock     sync.RWMutex `ignore:"true"`
 
 	ScalpPrice ScalpPrice
+
+	//止损时间
+	StopTime time.Time
+	Stop     bool
 }
 
 func (s *Strategy) ID() string {
@@ -136,6 +143,14 @@ func (s *Strategy) CurrentPosition() *types.Position {
 
 func (s *Strategy) ClosePosition(ctx context.Context, percentage fixedpoint.Value, tag string) error {
 
+	if tag == "stop" {
+		s.Stop = true
+		timeDur := time.Duration(1*60*1) * time.Minute //四小时
+
+		s.StopTime = time.Now().Add(timeDur) //四小时
+		bbgo.Notify("止损 。。。。。%v", s.StopTime)
+
+	}
 	//fmt.Println("时间差：", s.buyTime.Add(5*time.Minute), time.Now(), time.Now().After(s.buyTime.Add(5*time.Minute)))
 	//fmt.Println("仓位：", s.Position.IsLong(), s.Position.IsShort())
 	//
@@ -220,7 +235,7 @@ func (s *Strategy) AddKline(kline types.KLine) {
 	s.jma.Update(source)
 	s.rsx.Update(source)
 
-	fmt.Println("atr,jma,rsx", source, s.atr.Last(), s.jma.Last(), s.rsx.Last())
+	//fmt.Println("atr,jma,rsx", source, s.atr.Last(), s.jma.Last(), s.rsx.Last())
 }
 
 func (s *Strategy) smartCancel(ctx context.Context, pricef float64) int {
@@ -351,6 +366,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		tpShort:   0.0,
 		stopShort: 0.0,
 	}
+	s.Stop = false
 	// StrategyController
 	s.Status = types.StrategyStatusRunning
 	s.OnSuspend(func() {
@@ -431,87 +447,29 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 	}
 
 	s.change.Push(HOLD)
-	//s.InitDrawCommands(store, &profit, &cumProfit)
-
-	//store.OnKLine(func(kline types.KLine) {
-	//
-	//	s.klineHandler1m(ctx, kline)
-	//
-	//})
+	//if s.Side == "short" {
+	//	s.PostionCheck(ctx)
+	//}
+	//if s.Side == "long" {
+	//	s.PostionCheck1(ctx)
+	//}
 
 	store.OnKLineClosed(func(kline types.KLine) {
 		s.minutesCounter = int(kline.StartTime.Time().Add(kline.Interval.Duration()).Sub(s.startTime).Minutes())
-		//fmt.Println("minutesCounter", s.minutesCounter)
-		if kline.Interval == types.Interval1m {
-			s.klineHandler1m(ctx, kline)
-		}
-		if kline.Interval == s.Interval {
+
+		if kline.Interval == s.Interval && !s.Stop {
 			s.klineHandler(ctx, kline)
+			s.klineHandler1m(ctx, kline)
+		} else {
+			if s.StopTime.Before(time.Now()) {
+				s.Stop = false
+				bbgo.Notify("静默期 。。。。。")
+
+			}
 		}
 
 	})
 
-	//s.Session.UserDataStream.OnOrderUpdate(func(order types.Order) {
-	//	if order.OrderID == s.ScalpOrder.Order.OrderID {
-	//		s.ScalpOrder.Order = order
-	//	}
-	//
-	//})
-	//store.OnKLine(func(kline types.KLine) {
-	//
-	//	if s.ScalpOrder.Order.OrderID == 0 {
-	//		source := s.GetSource(&kline)
-	//		//sourcef := source.Float64()
-	//		opt := s.OpenPositionOptions
-	//		opt.Long = true
-	//		opt.Price = kline.Close
-	//		opt.LimitOrder = true
-	//
-	//		opt.Quantity = fixedpoint.NewFromFloat(5).Div(fixedpoint.NewFromFloat(0.1)).Round(0, fixedpoint.Down)
-	//		opt.Tags = []string{"long"}
-	//		log.Infof("source in long %v %v", source, price)
-	//		createdOrders, err := s.GeneralOrderExecutor.OpenPosition(ctx, opt)
-	//		if err != nil {
-	//			if _, ok := err.(types.ZeroAssetError); ok {
-	//				return
-	//			}
-	//			log.WithError(err).Errorf("cannot place buy order: %v %v", source, kline)
-	//			return
-	//		}
-	//		fmt.Println(createdOrders)
-	//		s.ScalpOrder.Order = createdOrders[0]
-	//
-	//	}
-	//	time.Sleep(5 * time.Second)
-	//	//fmt.Println(s.Position.IsLong(), s.ScalpOrder.StopOrder.OrderID, s.priceLines.Index(1), s.priceLines.Index(0))
-	//	if s.Position.IsLong() && s.ScalpOrder.StopOrder.OrderID == 0 {
-	//		s.priceLines.Update(s.buyPrice + 10)
-	//		s.priceLines.Update(s.buyPrice - 10)
-	//		fmt.Println("s.ScalpOrder.Order.Status", s.ScalpOrder.Order.Status, s.priceLines.Index(1), s.priceLines.Index(0))
-	//		if s.ScalpOrder.Order.Status == types.OrderStatusFilled {
-	//			if s.ScalpOrder.TakeProifOrder.OrderID == 0 {
-	//				s.LimitStopPosition(ctx, "take")
-	//			}
-	//			if s.ScalpOrder.StopOrder.OrderID == 0 {
-	//				s.LimitStopPosition(ctx, "stop")
-	//			}
-	//
-	//		}
-	//		//
-	//	}
-	//
-	//	//
-	//	//if len(nonTraded) == 0 {
-	//	//	if s.buyPrice > 0 {
-	//	//		closeOrders := s.ClosePosition(ctx, fixedpoint.One)
-	//	//		fmt.Println("close", closeOrders)
-	//	//
-	//	//	} else {
-	//	//
-	//	//	}
-	//	//}
-	//
-	//})
 	bbgo.OnShutdown(ctx, func(ctx context.Context, wg *sync.WaitGroup) {
 
 		var buffer bytes.Buffer
@@ -566,6 +524,24 @@ func (s *Strategy) klineHandler1m(ctx context.Context, kline types.KLine) {
 			}
 		}
 	}
+
+	if s.Position.IsShort() {
+		tag := ""
+		if highf > s.ScalpPrice.stopShort {
+			tag = "stop"
+		}
+		if lowf < s.ScalpPrice.tpShort {
+			tag = "limit"
+		}
+		exitCondition := (lowf < s.ScalpPrice.tpShort || highf > s.ScalpPrice.stopShort) || (s.change.Change() && s.change.Last() == BUY)
+		if exitCondition {
+			fmt.Println("平空")
+			err := s.ClosePosition(ctx, fixedpoint.One, tag)
+			if err != nil {
+				fmt.Println("----", err)
+			}
+		}
+	}
 	//if s.Position.IsShort() {
 	//	exitCondition := (lowf > s.ScalpPrice.tpShort || highf > s.ScalpPrice.stopShort) || (s.change.Change() && s.change.Last() == BUY)
 	//	if exitCondition {
@@ -576,7 +552,7 @@ func (s *Strategy) klineHandler1m(ctx context.Context, kline types.KLine) {
 
 }
 func (s *Strategy) checkPrice() {
-	atr := s.atr.Last()
+	atr := s.atr.Last() * s.AtrSigma
 
 	top3 := s.jma.Last() + atr*4.236
 	top2 := s.jma.Last() + atr*2.618
@@ -587,7 +563,7 @@ func (s *Strategy) checkPrice() {
 
 	k := s.Sigma
 
-	fmt.Println("s.Sigma", s.Sigma)
+	fmt.Println("s.Sigma", s.Sigma, s.AtrSigma)
 
 	tpLong := top2 * (1 - k)
 	stopLong := bott3 * (1 - k*0.5)
@@ -607,8 +583,8 @@ func (s *Strategy) checkPrice() {
 		tpShort:   tpShort,
 		stopShort: stopShort,
 	}
-	bbgo.Notify("long sma:%4.f,bott2:%.4f,limit:%.4f,stop:%.4f,atr:%.4f", s.jma.Last(), bott2, tpLong, stopLong, atr)
-	bbgo.Notify("short sma:%4.f,top2:%.4f,limit:%.4f,stop:%.4f,atr:%.4f", s.jma.Last(), top2, tpShort, stopShort, atr)
+	bbgo.Notify("long sma:%4.f,bott2:%.4f,limit:%.4f,stop:%.4f,atr:%.4f,atrx:%.4f", s.jma.Last(), bott2, tpLong, stopLong, s.atr.Last(), atr)
+	bbgo.Notify("short sma:%4.f,top2:%.4f,limit:%.4f,stop:%.4f,atr:%.4f,,atrx:%.4f", s.jma.Last(), top2, tpShort, stopShort, s.atr.Last(), atr)
 
 }
 
@@ -653,14 +629,29 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 
 	s.change.Push(sig)
 
+	switch s.Side {
+	case "long":
+		s.ProcessLong(ctx, kline)
+	case "short":
+		s.ProcessShort(ctx, kline)
+	case "both":
+
+	default:
+		log.Panicf("undefined side: %s", s.Side)
+	}
+
 	//changed := s.change.Change()
 
-	longCondition := s.change.Last() == BUY && s.rsx.Last() < 35
+}
 
-	//shortCondition := changed && s.change.Last() == SELL
-	//fmt.Printf("longCondition %t, change:%t,last:%s \n", longCondition,    changed, s.change.Last())
-	if s.Position.IsOpened(kline.Close) {
-		fmt.Println("已开 不能下单")
+// 多单处理
+func (s *Strategy) ProcessLong(ctx context.Context, kline types.KLine) {
+
+	source := s.GetSource(&kline)
+	price := s.getLastPrice()
+
+	longCondition := s.change.Last() == BUY && s.rsx.Last() < 35
+	if s.Position.IsLong() {
 		bbgo.Notify("%s position is already opened, skip", s.Symbol)
 		return
 	}
@@ -673,19 +664,13 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 		if source.Compare(price) > 0 {
 			source = price
 		}
-		opt := s.OpenPositionOptions
-		opt.LimitOrder = false
-		opt.Long = true
-		opt.Price = source
-		//
-		//opt.Price = kline.Close
-		opt.Leverage = s.Leverage
-
-		//opt.Quantity = fixedpoint.NewFromFloat(0.25).Round(0, fixedpoint.Down)
-
-		opt.Tags = []string{"long"}
-		log.Infof("source in long %v %v", source, price)
-		createdOrders, err := s.GeneralOrderExecutor.OpenPosition(ctx, opt)
+		createdOrders, err := s.GeneralOrderExecutor.SubmitOrders(ctx, types.SubmitOrder{
+			Symbol:   s.Symbol,
+			Side:     types.SideTypeBuy,
+			Quantity: s.Quantity,
+			Type:     types.OrderTypeMarket,
+			Tag:      "short: sell in",
+		})
 		if err != nil {
 			if _, ok := err.(types.ZeroAssetError); ok {
 				return
@@ -698,33 +683,55 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 		}
 		return
 	}
-	//if shortCondition {
-	//	fmt.Println("开空")
-	//	if err := s.GeneralOrderExecutor.GracefulCancel(ctx); err != nil {
-	//		log.WithError(err).Errorf("cannot cancel orders")
-	//		return
-	//	}
-	//	if source.Compare(price) < 0 {
-	//		source = price
-	//	}
-	//	opt := s.OpenPositionOptions
-	//	opt.LimitOrder = false
-	//	opt.Short = true
-	//	opt.Price = source
-	//	opt.Leverage = s.Leverage
-	//	opt.Tags = []string{"short"}
-	//	log.Infof("source in short %v %v", source, price)
-	//	createdOrders, err := s.GeneralOrderExecutor.OpenPosition(ctx, opt)
-	//	if err != nil {
-	//		if _, ok := err.(types.ZeroAssetError); ok {
-	//			return
-	//		}
-	//		log.WithError(err).Errorf("cannot place sell order: %v %v", source, kline)
-	//		return
-	//	}
-	//	if createdOrders != nil {
-	//		s.orderPendingCounter[createdOrders[0].OrderID] = s.minutesCounter
-	//	}
-	//	return
-	//}
+}
+
+// 空单处理
+func (s *Strategy) ProcessShort(ctx context.Context, kline types.KLine) {
+
+	source := s.GetSource(&kline)
+	price := s.getLastPrice()
+
+	shortCondition := s.change.Last() == SELL && s.rsx.Last() > 65
+	if s.Position.IsShort() {
+		bbgo.Notify("%s position is already opened, skip", s.Symbol)
+		return
+	}
+
+	if shortCondition {
+		bbgo.Notify("开空")
+		if err := s.GeneralOrderExecutor.GracefulCancel(ctx); err != nil {
+			log.WithError(err).Errorf("cannot cancel orders")
+			return
+		}
+		if source.Compare(price) < 0 {
+			source = price
+		}
+
+		createdOrders, err := s.GeneralOrderExecutor.SubmitOrders(ctx, types.SubmitOrder{
+			Symbol:   s.Symbol,
+			Side:     types.SideTypeSell,
+			Quantity: s.Quantity,
+			Type:     types.OrderTypeMarket,
+			Tag:      "short: sell in",
+		})
+		//opt := s.OpenPositionOptions
+		//opt.LimitOrder = false
+		//opt.Short = true
+		//opt.Price = source
+		//opt.Leverage = s.Leverage
+		//opt.Tags = []string{"short"}
+		//log.Infof("source in short %v %v", source, price)
+		//createdOrders, err := s.GeneralOrderExecutor.OpenPosition(ctx, opt)
+		if err != nil {
+			if _, ok := err.(types.ZeroAssetError); ok {
+				return
+			}
+			log.WithError(err).Errorf("cannot place sell order: %v %v", source, kline)
+			return
+		}
+		if createdOrders != nil {
+			s.orderPendingCounter[createdOrders[0].OrderID] = s.minutesCounter
+		}
+		return
+	}
 }

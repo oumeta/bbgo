@@ -400,7 +400,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		return nil
 	}
 	s.initTickerFunctions()
-	s.PostionCheck(ctx)
+	//s.PostionCheck(ctx)
 	s.session.MarketDataStream.OnKLineClosed(types.KLineWith(s.Symbol, s.Interval, func(kline types.KLine) {
 		s.AddKline(kline)
 
@@ -458,7 +458,7 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 		//}
 
 		if s.Position.IsShort() {
-			exitCondition := s.PriceLine.CrossOver(s.hma).Last() // || (s.change.Change() && s.change.Last() == BUY)
+			exitCondition := s.PriceLine.CrossOver(s.hma).Last() //|| (s.change.Change() && s.change.Last() == BUY)
 
 			if exitCondition {
 				fmt.Println("平空")
