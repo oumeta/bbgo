@@ -81,9 +81,10 @@ type Strategy struct {
 
 	atr *indicator.ATR
 
-	change *indi.Slice
-	jma    *indi.JMA
-	rsx    *indi.RSX
+	change    *indi.Slice
+	jma       *indi.JMA
+	rsx       *indi.RSX
+	PriceOpen *types.Queue
 
 	orders *types.Queue
 
@@ -234,6 +235,7 @@ func (s *Strategy) AddKline(kline types.KLine) {
 	s.atr.PushK(kline)
 	s.jma.Update(source)
 	s.rsx.Update(source)
+	s.PriceOpen.Update(kline.Open.Float64())
 
 	//fmt.Println("atr,jma,rsx", source, s.atr.Last(), s.jma.Last(), s.rsx.Last())
 }
@@ -392,6 +394,9 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 	for _, method := range s.ExitMethods {
 		method.Bind(session, s.GeneralOrderExecutor)
 	}
+
+	s.PriceOpen = types.NewQueue(300)
+	s.StopTime = time.Now()
 	profit := floats.Slice{1., 1.}
 	price, _ := s.Session.LastPrice(s.Symbol)
 	initAsset := s.CalcAssetValue(price).Float64()
@@ -456,16 +461,16 @@ func (s *Strategy) Run(ctx context.Context, orderExecutor bbgo.OrderExecutor, se
 
 	store.OnKLineClosed(func(kline types.KLine) {
 		s.minutesCounter = int(kline.StartTime.Time().Add(kline.Interval.Duration()).Sub(s.startTime).Minutes())
-
-		if kline.Interval == s.Interval && !s.Stop {
-			s.klineHandler(ctx, kline)
-			s.klineHandler1m(ctx, kline)
-		} else {
+		if s.Stop {
 			if s.StopTime.Before(time.Now()) {
 				s.Stop = false
 				bbgo.Notify("静默期 。。。。。")
 
 			}
+		}
+		if kline.Interval == s.Interval && !s.Stop {
+			s.klineHandler(ctx, kline)
+			s.klineHandler1m(ctx, kline)
 		}
 
 	})
@@ -613,8 +618,8 @@ func (s *Strategy) klineHandler(ctx context.Context, kline types.KLine) {
 	)
 	s.checkPrice()
 
-	up := kline.Low.Float64() < s.ScalpPrice.bott2 && kline.Low.Float64() > s.ScalpPrice.bott3 && kline.Close.Compare(kline.Low) > 0
-	down := kline.High.Float64() > s.ScalpPrice.top2 && kline.High.Float64() < s.ScalpPrice.top3 && kline.Close.Compare(kline.High) < 0
+	up := kline.Low.Float64() < s.ScalpPrice.bott2 && kline.Low.Float64() > s.ScalpPrice.bott3 && s.PriceOpen.Index(0) > s.PriceOpen.Index(1)
+	down := kline.High.Float64() > s.ScalpPrice.top2 && kline.High.Float64() < s.ScalpPrice.top3 && s.PriceOpen.Index(0) < s.PriceOpen.Index(1)
 
 	sig := s.change.Last()
 
